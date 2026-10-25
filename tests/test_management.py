@@ -81,7 +81,7 @@ async def test_diagnostics_action_excludes_device_and_account_secrets():
     assert result["result"]["settings_failures"]["active_mode"]["result_code"] == 1
 
 
-async def test_frontend_registers_static_module_once(hass):
+async def test_frontend_registers_route_without_preloading_before_ha(hass):
     from homeassistant.components.frontend import DATA_EXTRA_MODULE_URL
     from homeassistant.helpers.collection import ObservableCollection  # noqa: F401
 
@@ -94,7 +94,7 @@ async def test_frontend_registers_static_module_once(hass):
     http.async_register_static_paths.assert_awaited_once()
     paths = http.async_register_static_paths.call_args.args[0]
     assert paths[0].url_path == "/abb_chargersync/chargersync-card.js"
-    assert any("chargersync-card.js?v=" in url for url in hass.data[DATA_EXTRA_MODULE_URL])
+    assert not hass.data[DATA_EXTRA_MODULE_URL]
 
 
 async def test_lovelace_resource_registered_once_without_changing_other_resources(hass):

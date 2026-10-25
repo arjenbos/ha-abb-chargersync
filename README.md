@@ -7,7 +7,7 @@
 
 Custom cloud integration for chargers used with the official ABB ChargerSync app. Based on static analysis of ChargerSync 3.5.0.
 
-**Version 0.2.1 — experimental.** Automated tests cover Home Assistant and a local server emulator. Live testing has now confirmed REST access, remote login, charging-status reads, and several settings on one charger running firmware 1.8.37. Charging commands, other hardware, and concurrent use with the official app still require validation.
+**Version 0.2.2 — experimental.** Automated tests cover Home Assistant and a local server emulator. Live testing has now confirmed REST access, remote login, charging-status reads, and several settings on one charger running firmware 1.8.37. Charging commands, other hardware, and concurrent use with the official app still require validation.
 
 English is the primary language for code and documentation. Integration translations live in `custom_components/abb_chargersync/translations/`, including Dutch in `nl.json`.
 
@@ -189,6 +189,19 @@ Tests use synthetic data and a local cloud emulator, without real account creden
 ## Branding
 
 The original ChargerSync logo and app icon are extracted from the supplied Android package and bundled with the integration. Light and dark logo variants are included. See [asset provenance](docs/branding.md).
+
+## Changes in 0.2.2
+
+- Load the card exclusively as a Lovelace resource. Loading it as an extra frontend
+  module could register it before HA replaces the native custom-element registry,
+  causing the card picker to report that the custom element was not found.
+- Refresh the browser after upgrading to discard the old registry and module cache.
+
+## Changes in 0.2.1
+
+Version 0.2.2 also fixes custom-card startup: assets are published before cloud
+discovery, and the card is registered as a versioned Lovelace module in resource
+storage mode. Refresh the browser after upgrading.
 
 ## Changes in 0.1.1
 

@@ -110,6 +110,21 @@ Assistant. No manual dashboard resource, separate website, or sidebar panel is
 required. After installing or upgrading the integration, restart Home Assistant
 and refresh the browser.
 
+In the default resource storage mode, the module is also registered in Lovelace's
+resource collection so it is loaded before the custom element is created. Its URL
+includes the integration version and is updated in place on upgrade. The asset route is registered before the first cloud refresh, including when the
+vendor cloud is temporarily unavailable. The card is deliberately not loaded as
+an extra frontend module: it must register after HA installs its scoped
+custom-element registry.
+
+If you explicitly manage resources in YAML mode, add this entry under your existing
+`lovelace.resources` list to ensure the same ordered loading:
+
+```yaml
+- url: /abb_chargersync/chargersync-card.js?v=0.2.2
+  type: module
+```
+
 1. Open your existing dashboard and choose **Edit dashboard → Add card**.
 2. Search for **ChargerSync management** in the community cards section.
 3. Choose your charger's **Charging status** sensor in the visual configuration form.

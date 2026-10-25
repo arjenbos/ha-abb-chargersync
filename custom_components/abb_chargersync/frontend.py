@@ -3,7 +3,6 @@
 import asyncio
 from pathlib import Path
 
-from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.components.lovelace.resources import ResourceStorageCollection
@@ -19,7 +18,7 @@ async def async_register_card_resource(hass):
         return
     resources = lovelace.resources
     if not isinstance(resources, ResourceStorageCollection):
-        # YAML-owned resources remain user managed; the extra module is the fallback.
+        # YAML-owned resources remain user managed.
         return
     await resources.async_get_info()
     url = f"{CARD_PATH}?v={VERSION}"
@@ -51,6 +50,8 @@ async def async_setup_frontend(hass):
                     )
                 ]
             )
-            frontend.add_extra_js_url(hass, f"{CARD_PATH}?v={VERSION}")
+            # Load only through Lovelace, after HA installs its scoped registry.
+            # An extra frontend module can register against the native registry
+            # before HA replaces it, leaving the card invisible to the picker.
             hass.data[key] = True
         await async_register_card_resource(hass)
