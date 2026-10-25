@@ -7,7 +7,7 @@
 
 Custom cloud integration for chargers used with the official ABB ChargerSync app. Based on static analysis of ChargerSync 3.5.0.
 
-**Version 0.1.1 — experimental.** Automated tests cover Home Assistant and a local server emulator. Live testing has now confirmed REST access, remote login, charging-status reads, and several settings on one charger running firmware 1.8.37. Charging commands, other hardware, and concurrent use with the official app still require validation.
+**Version 0.2.1 — experimental.** Automated tests cover Home Assistant and a local server emulator. Live testing has now confirmed REST access, remote login, charging-status reads, and several settings on one charger running firmware 1.8.37. Charging commands, other hardware, and concurrent use with the official app still require validation.
 
 English is the primary language for code and documentation. Integration translations live in `custom_components/abb_chargersync/translations/`, including Dutch in `nl.json`.
 
@@ -37,7 +37,7 @@ Available per charger, depending on its responses and supported capabilities:
 | Button | Start charging, stop charging, and skip the random charging delay |
 | Number | Charging current limit and Eco mix minimum current, in whole amperes |
 | Select | Default and active-session charging modes: `max_speed`, `eco_mix`, `solar` |
-| Switch | Enable solar charging control and ignore the Eco mix start/stop threshold |
+| Switch | Start/stop charging with session feedback, enable solar charging control, and ignore the Eco mix start/stop threshold |
 | Lock | Lock and unlock the physical charging cable |
 
 The Eco mix minimum current is configurable only when Eco mix is the default mode. Additional thresholds and waiting times are available through actions.
@@ -46,9 +46,76 @@ Apparent power is calculated as the sum of U×I and reported in **VA**. It is no
 
 The available-firmware sensor shows a version only when the server offers exactly one distinct version. Firmware installation is excluded because the official app requires Bluetooth for it.
 
+## Energy dashboard
+
+The **Charging energy** sensor accumulates observed energy across charging sessions
+and restores its counter after a normal Home Assistant restart. Add it under
+**Settings → Dashboards → Energy → Individual devices**. A **Solar charging energy**
+sensor is also available when the charger supplies solar measurements; it is a subset
+of total charging energy. Session display sensors are not Energy-dashboard meters.
+See [setup and accounting limitations](docs/energy-dashboard.md).
+
+## EVCC
+
+EVCC can control the charger through its **Home Assistant charger** template.
+EVCC connects to Home Assistant's API; this integration communicates with the
+charger through the ABB cloud, so internet access is still required.
+
+1. Install or update the integration and restart Home Assistant.
+2. In Home Assistant, open the charger's device page and note the entity IDs for
+   **EVCC status**, **Charging enabled**, **Charging current limit**, and
+   **Charging energy**.
+3. Create a long-lived access token from your Home Assistant user profile and
+   configure the Home Assistant connection and credentials in EVCC. Use a Home
+   Assistant URL that EVCC can reach.
+4. Add a **Home Assistant charger** in EVCC and select the entities below, or
+   use the YAML example. Replace the URL and example entity IDs with your own.
+5. Use **Max speed** charging mode and disable conflicting schedules or solar
+   controls in the official app when EVCC should manage charging.
+
+| EVCC parameter | Home Assistant entity | Purpose |
+|---|---|---|
+| `status` | `sensor.driveway_evcc_status` | A = available, B = connected, C = charging |
+| `enabled` | `switch.driveway_charging_enabled` | Charger-derived session feedback |
+| `enable` | `switch.driveway_charging_enabled` | Start or stop a charging session |
+| `setMaxCurrent` | `number.driveway_charging_current_limit` | Current limit in whole amperes |
+| `energy` | `sensor.driveway_charging_energy` | Cumulative observed charging energy in kWh |
+
+Example charger configuration in `evcc.yaml`, after configuring the Home Assistant
+credentials in EVCC:
+
+```yaml
+chargers:
+  - name: driveway
+    type: template
+    template: homeassistant
+    uri: http://homeassistant.local:8123
+    status: sensor.driveway_evcc_status
+    enabled: switch.driveway_charging_enabled
+    enable: switch.driveway_charging_enabled
+    setMaxCurrent: number.driveway_charging_current_limit
+    energy: sensor.driveway_charging_energy
+```
+
+Assign this charger to your EVCC loadpoint. Keep `milliamps` disabled: the current
+limit supports whole amperes from 6 A to the charger's maximum. Do not use the
+**Apparent power** sensor as EVCC's `power` measurement: it reports VA, not active
+power in W. No phase-switching control is exposed.
+
+**Session-control limitations:** the switch reports observed charger state rather
+than remembering the last command. Ambiguous states return unknown; offline
+entities become unavailable. The protocol does not provide a separate permanent
+"charging allowed" flag, so starting while unplugged does not guarantee that a
+future connection is authorized. Polling defaults to 30 seconds. Verify start,
+stop, vehicle sleep/wake and reconnect with your charger before unattended use.
+
+See [EVCC setup and feedback details](docs/evcc.md),
+[energy accounting limitations](docs/energy-dashboard.md), and the
+[EVCC Home Assistant charger documentation](https://docs.evcc.io/en/chargers/home-assistant-charger/).
+
 ## Lovelace dashboard
 
-A ready-to-customize native dashboard is included in `dashboards/chargersync.yaml`. It provides **Charging** and **Diagnostics** views, a responsive layout, session metrics, charging controls, solar settings, and phase graphs. No frontend plugins are required.
+A ready-to-customize dashboard is included in `dashboards/chargersync.yaml`. It provides **Charging**, **Diagnostics**, and **Management** views, with native cards for measurements and controls and a bundled management card for schedules, history, tariffs, reports, and logs. The integration automatically loads the card module; no separate frontend installation is required.
 
 ![Dashboard design preview with example data](docs/assets/dashboard-preview.png)
 

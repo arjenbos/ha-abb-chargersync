@@ -24,7 +24,15 @@ PLATFORMS = [
 type ChargerSyncConfigEntry = ConfigEntry[ChargerSyncCoordinator]
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Publish frontend assets before any cloud-dependent entry refresh."""
+    await async_setup_frontend(hass)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ChargerSyncConfigEntry) -> bool:
+    await async_setup_frontend(hass)
+
     def save_token(token: dict) -> None:
         hass.config_entries.async_update_entry(entry, data={**entry.data, "token": token})
 
@@ -34,7 +42,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ChargerSyncConfigEntry) 
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
         async_register_services(hass)
-        await async_setup_frontend(hass)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except BaseException:
         await coordinator.async_close()

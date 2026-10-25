@@ -9,9 +9,10 @@
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "0.2.0",
+  "version": "0.2.1",
   "issue_tracker": "https://github.com/arjenbos/ha-abb-cybersync/issues",
   "after_dependencies": [
-    "frontend"
+    "frontend",
+    "lovelace"
   ]
 }

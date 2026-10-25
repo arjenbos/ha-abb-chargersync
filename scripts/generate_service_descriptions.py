@@ -49,6 +49,7 @@ fields = {
                 "log_info",
                 "logs",
                 "solar_offsets",
+                "diagnostics",
             ]
         ),
         True,

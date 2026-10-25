@@ -1,7 +1,7 @@
 """Constants from the ChargerSync 3.5.0 Android application."""
 
 DOMAIN = "abb_chargersync"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 API_URL = "https://abb-user.chargedot.com/"
 WS_URL = "wss://abb.api.chargedot.com:18971/ws/login"
 APP_VERSION = "3.5.0"

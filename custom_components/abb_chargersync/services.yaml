@@ -53,6 +53,7 @@ get_data:
           - log_info
           - logs
           - solar_offsets
+          - diagnostics
     page:
       name: Page
       required: false

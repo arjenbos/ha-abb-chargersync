@@ -1,6 +1,15 @@
 """Session and device sensors. Never present stale readings as live measurements."""
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from dataclasses import dataclass
+from math import isfinite
+
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorDeviceClass,
+    SensorEntity,
+    SensorExtraStoredData,
+    SensorStateClass,
+)
 from homeassistant.const import (
     EntityCategory,
     UnitOfElectricCurrent,
@@ -8,8 +17,11 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfTime,
 )
+from homeassistant.core import callback
 
+from .energy import EnergyCounter
 from .entity import ChargerSyncEntity, discover
+from .evcc import IEC_STATUS
 
 PARALLEL_UPDATES = 0
 SENSORS = {
@@ -18,13 +30,13 @@ SENSORS = {
         "Session energy",
         UnitOfEnergy.KILO_WATT_HOUR,
         SensorDeviceClass.ENERGY,
-        SensorStateClass.TOTAL,
+        None,
     ),
     "solar_energy": (
         "Session solar energy",
         UnitOfEnergy.KILO_WATT_HOUR,
         SensorDeviceClass.ENERGY,
-        SensorStateClass.TOTAL,
+        None,
     ),
     "solar_percentage": ("Session solar share", "%", None, SensorStateClass.MEASUREMENT),
     "duration": (
@@ -70,6 +82,10 @@ for phase in (1, 2, 3):
 
 async def async_setup_entry(hass, entry, async_add_entities):
     def factory(c, i, snapshot):
+        yield EVCCStatusSensor(c, i, "evcc_status", "EVCC status", required="status_code")
+        yield ChargingEnergySensor(c, i, "session_energy", "Charging energy")
+        if "solar_energy" in snapshot.get("state", {}):
+            yield ChargingEnergySensor(c, i, "solar_energy", "Solar charging energy")
         for key in SENSORS:
             if key == "status" or key in snapshot.get("state", {}):
                 yield ChargerSyncSensor(c, i, key)
@@ -97,6 +113,66 @@ class ChargerSyncSensor(ChargerSyncEntity, SensorEntity):
     @property
     def native_value(self):
         return self.state_data.get(self.key)
+
+
+@dataclass
+class EnergyStoredData(SensorExtraStoredData):
+    """Restore both total and session checkpoints as one HA restore-state record."""
+
+    counter: dict
+
+    def as_dict(self):
+        return {**super().as_dict(), "counter": self.counter}
+
+
+class ChargingEnergySensor(ChargerSyncEntity, RestoreSensor):
+    """An Energy-dashboard counter that remains stable between sessions."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_suggested_display_precision = 3
+    _attr_icon = "mdi:ev-station"
+
+    def __init__(self, coordinator, device_id, source, name):
+        key = "charging_energy" if source == "session_energy" else "solar_charging_energy"
+        super().__init__(coordinator, device_id, key, name, remote=False)
+        self.source = source
+        self.counter = EnergyCounter()
+        self._restored = False
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        if (restored := await self.async_get_last_extra_data()) is not None:
+            data = restored.as_dict()
+            if data.get("native_unit_of_measurement") == UnitOfEnergy.KILO_WATT_HOUR:
+                self.counter.restore(data.get("counter"))
+        self._restored = True
+        self._consume()
+
+    @callback
+    def _handle_coordinator_update(self):
+        if self._restored:
+            self._consume()
+        super()._handle_coordinator_update()
+
+    def _consume(self):
+        if self.snapshot.get("remote_available"):
+            self.counter.update(self.state_data.get("session_id"), self.state_data.get(self.source))
+
+    @property
+    def available(self):
+        return super().available and self.counter.initialized
+
+    @property
+    def native_value(self):
+        return self.counter.total if self.counter.initialized else None
+
+    @property
+    def extra_restore_state_data(self):
+        return EnergyStoredData(
+            self.native_value, self.native_unit_of_measurement, self.counter.as_dict()
+        )
 
 
 class FirmwareSensor(ChargerSyncEntity, SensorEntity):
@@ -164,7 +240,10 @@ class ResourceSensor(ChargerSyncEntity, SensorEntity):
         last = max(completed, key=lambda r: str(r["stopTime"]), default={})
         value = last.get(self.field)
         try:
-            return float(value) if value is not None else None
+            number = float(value) if value is not None else None
+            if number is None or not isfinite(number):
+                return None
+            return number / 1000 if self.field == "energy" else number
         except TypeError, ValueError:
             return None
 
@@ -177,3 +256,13 @@ class ResourceSensor(ChargerSyncEntity, SensorEntity):
             last = max(completed, key=lambda r: str(r["stopTime"]), default={})
             return {"currency_id": last.get("currencyType"), "source": "ChargerSync"}
         return None
+
+
+class EVCCStatusSensor(ChargerSyncEntity, SensorEntity):
+    """Expose IEC states without disguising faults or ambiguous states as ready."""
+
+    _attr_icon = "mdi:ev-station"
+
+    @property
+    def native_value(self):
+        return IEC_STATUS.get(self.state_data.get("status_code"))

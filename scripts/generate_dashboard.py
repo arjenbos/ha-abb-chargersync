@@ -65,10 +65,40 @@ def generate(prefix: str, name: str, mapping: dict[str, str] | None = None) -> d
     return customize(template, prefix, name.strip(), mapping)
 
 
+def generate_from_registry(path: Path, name: str, status_entity: str | None = None) -> dict:
+    """Match original integration names within one device, including renamed IDs."""
+    registry = json.loads(path.read_text())
+    entries = [e for e in registry["data"]["entities"] if e.get("platform") == "abb_chargersync"]
+    candidates = [e for e in entries if e.get("original_name") == "Charging status"]
+    if status_entity:
+        candidates = [e for e in candidates if e["entity_id"] == status_entity]
+    if len(candidates) != 1 or not candidates[0].get("device_id"):
+        raise ValueError("Select exactly one charger's charging-status entity with --status-entity")
+    status = candidates[0]
+    template_entities = set(ENTITY_PATTERN.findall(TEMPLATE.read_text()))
+    mapping = {}
+    for entry in entries:
+        if entry.get("device_id") != status["device_id"]:
+            continue
+        domain = entry["entity_id"].split(".")[0]
+        slug = re.sub(r"[^a-z0-9]+", "_", (entry.get("original_name") or "").lower()).strip("_")
+        source = f"{domain}.charger_{slug}"
+        if source in template_entities:
+            if source in mapping:
+                raise ValueError(f"Multiple entities match {source}; use an explicit entity map")
+            mapping[source] = entry["entity_id"]
+    prefix = status["entity_id"].split(".")[1].removesuffix("_charging_status")
+    return generate(prefix, name, mapping)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--entity-prefix", help="For sensor.driveway_charging_status, use driveway")
     parser.add_argument(
-        "--entity-prefix", required=True, help="For sensor.driveway_charging_status, use driveway"
+        "--from-registry", type=Path, help="Read only the HA entity registry to match actual IDs"
+    )
+    parser.add_argument(
+        "--status-entity", help="Choose the charger when the registry contains multiple chargers"
     )
     parser.add_argument("--name", default="Home charger", help="Dashboard heading")
     parser.add_argument(
@@ -82,8 +112,15 @@ def main() -> None:
         mapping = json.loads(args.entity_map.read_text()) if args.entity_map else {}
         if not isinstance(mapping, dict):
             raise ValueError("Entity map must be a JSON object")
-        config = generate(args.entity_prefix, args.name, mapping)
-    except (ValueError, OSError) as err:
+        if args.from_registry:
+            if args.entity_prefix or args.entity_map:
+                raise ValueError("Use --from-registry without --entity-prefix or --entity-map")
+            config = generate_from_registry(args.from_registry, args.name, args.status_entity)
+        elif args.entity_prefix:
+            config = generate(args.entity_prefix, args.name, mapping)
+        else:
+            raise ValueError("Provide --entity-prefix or --from-registry")
+    except (ValueError, KeyError, OSError) as err:
         parser.error(str(err))
     if args.output.resolve() == TEMPLATE:
         parser.error("Choose an output path other than the source template")

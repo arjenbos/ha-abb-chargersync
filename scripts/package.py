@@ -30,6 +30,7 @@ def main() -> None:
             "docs/implementation.md",
             "docs/branding.md",
             "docs/dashboard.md",
+            "docs/energy-dashboard.md",
             "scripts/generate_dashboard.py",
         )
     ]

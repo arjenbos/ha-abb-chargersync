@@ -72,6 +72,8 @@ async def test_full_setup_entities_services_dynamic_devices_and_unload(hass):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         assert entry.state == ConfigEntryState.LOADED
+        assert hass.states.get("sensor.driveway_evcc_status").state == "C"
+        assert hass.states.get("switch.driveway_charging_enabled").state == "on"
         assert hass.states.get("sensor.driveway_session_energy").state == "1.2"
         assert hass.states.get("lock.driveway_charging_cable").state == "locked"
         assert hass.states.get("number.driveway_charging_current_limit").state == "16"
