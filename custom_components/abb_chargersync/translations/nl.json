@@ -1,0 +1,42 @@
+{
+  "title": "ABB ChargerSync",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Aanmelden bij ChargerSync",
+        "description": "Meld je aan met je officiële ChargerSync-account. Koppel laadpalen en beheer toegangsrechten in de officiële app.",
+        "data": {
+          "username": "E-mailadres",
+          "password": "Wachtwoord"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Opnieuw aanmelden",
+        "description": "Herstel de verbinding met hetzelfde ChargerSync-account.",
+        "data": {
+          "username": "E-mailadres",
+          "password": "Wachtwoord"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Het e-mailadres of wachtwoord is onjuist, of de toegang is ingetrokken.",
+      "cannot_connect": "ChargerSync is niet bereikbaar. Probeer het opnieuw."
+    },
+    "abort": {
+      "already_configured": "Dit account is al ingesteld.",
+      "no_devices": "Geen gekoppelde laadpalen gevonden. Voeg je laadpaal eerst toe in de officiële app.",
+      "reauth_successful": "Opnieuw aangemeld.",
+      "unique_id_mismatch": "Meld je aan met het oorspronkelijke account."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "scan_interval": "Verversingsinterval (seconden)"
+        }
+      }
+    }
+  }
+}

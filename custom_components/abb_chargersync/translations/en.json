@@ -1,0 +1,42 @@
+{
+  "title": "ABB ChargerSync",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sign in to ChargerSync",
+        "description": "Sign in with your official ChargerSync account. Link chargers and manage access permissions in the official app.",
+        "data": {
+          "username": "Email address",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "Renew the connection to the same ChargerSync account.",
+        "data": {
+          "username": "Email address",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "The email address or password is incorrect, or access was revoked.",
+      "cannot_connect": "Unable to reach ChargerSync. Please try again."
+    },
+    "abort": {
+      "already_configured": "This account is already configured.",
+      "no_devices": "No linked chargers found. Add your charger in the official app first.",
+      "reauth_successful": "Sign-in renewed.",
+      "unique_id_mismatch": "Sign in with the original account."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "scan_interval": "Refresh interval (seconds)"
+        }
+      }
+    }
+  }
+}

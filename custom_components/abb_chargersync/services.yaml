@@ -1,0 +1,274 @@
+set_solar_offsets:
+  name: Update solar thresholds
+  description: Patch Solar/Eco mix current offsets (0..5 A) and waiting times (0..120
+    s). Other values are preserved.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: &id001
+        device:
+          integration: abb_chargersync
+    settings:
+      name: Settings
+      required: true
+      selector: &id005
+        object: {}
+update_charger:
+  name: Rename charger
+  description: Change the charger name in the ChargerSync cloud.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    name:
+      name: Charger name
+      required: true
+      selector: &id002
+        text: {}
+get_data:
+  name: Get cloud data
+  description: Return sessions, statistics, schedules, tariffs, report settings, firmware
+    packages or device diagnostics.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    resource:
+      name: Data
+      required: true
+      selector:
+        select:
+          options:
+          - sessions
+          - trends
+          - schedules
+          - price
+          - auto_export
+          - firmware
+          - currencies
+          - load_limits
+          - log_info
+          - logs
+          - solar_offsets
+    page:
+      name: Page
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+    limit:
+      name: Page size / log count
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    start_time:
+      name: Start time
+      required: false
+      selector: *id002
+      description: For schedules HH:MM; for history and exports use the API date/time
+        format returned by get_data.
+    end_time:
+      name: End time
+      required: false
+      selector: *id002
+    card_number:
+      name: Card filter
+      required: false
+      selector: *id002
+    company_only:
+      name: Company-car sessions
+      required: false
+      selector: &id003
+        boolean: {}
+    trend_type:
+      name: Trend type
+      required: false
+      selector: *id002
+    log_from:
+      name: First log serial
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 4294967295
+          mode: box
+create_schedule:
+  name: Create charging schedule
+  description: Create a cloud charging time window.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    start_time:
+      name: Start time
+      required: true
+      selector: *id002
+      description: For schedules HH:MM; for history and exports use the API date/time
+        format returned by get_data.
+    end_time:
+      name: End time
+      required: true
+      selector: *id002
+    enabled:
+      name: Enabled
+      required: false
+      selector: *id003
+update_schedule:
+  name: Update charging schedule
+  description: Update an existing schedule belonging to this charger.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    schedule_id:
+      name: Schedule ID
+      required: true
+      selector: &id004
+        number:
+          min: 0
+          max: 2147483647
+          mode: box
+    start_time:
+      name: Start time
+      required: true
+      selector: *id002
+      description: For schedules HH:MM; for history and exports use the API date/time
+        format returned by get_data.
+    end_time:
+      name: End time
+      required: true
+      selector: *id002
+    enabled:
+      name: Enabled
+      required: true
+      selector: *id003
+delete_schedule:
+  name: Delete charging schedule
+  description: Delete a schedule belonging to this charger.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    schedule_id:
+      name: Schedule ID
+      required: true
+      selector: *id004
+set_price:
+  name: Update energy tariff
+  description: Merge tariff fields into the current tariff, preserving other settings.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    settings:
+      name: Settings
+      required: true
+      selector: *id005
+set_auto_export:
+  name: Update automatic reports
+  description: Merge report settings into the current configuration. Cycle is 1, 3
+    or 6 months.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    settings:
+      name: Settings
+      required: true
+      selector: *id005
+export_sessions:
+  name: Export charging sessions
+  description: Request a report sent by ChargerSync to the supplied email address.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    email:
+      name: Recipient email
+      required: true
+      selector: *id002
+    format:
+      name: Report format
+      required: true
+      selector:
+        select:
+          options:
+          - csv
+          - excel
+          - pdf
+    start_time:
+      name: Start time
+      required: true
+      selector: *id002
+      description: For schedules HH:MM; for history and exports use the API date/time
+        format returned by get_data.
+    end_time:
+      name: End time
+      required: true
+      selector: *id002
+    card_number:
+      name: Card filter
+      required: false
+      selector: *id002
+    company_only:
+      name: Company-car sessions
+      required: false
+      selector: *id003
+set_company_session:
+  name: Mark company-car session
+  description: Change the company-car flag of a session in this charger’s recent history.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    session_id:
+      name: Cloud session orderId
+      required: true
+      selector: *id002
+    company:
+      name: Company-car session
+      required: true
+      selector: *id003
+replace_load_limits:
+  name: Replace timed current limits
+  description: Replace all current-limit time ranges; existing country-specific ranges
+    are replaced too.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001
+    ranges:
+      name: Time ranges
+      required: true
+      selector:
+        object: {}
+      description: List of weekdays bitmask, from/to seconds after midnight and limit
+        in amperes. Replaces the entire list, including country-specific limits.
+    enabled:
+      name: Enabled
+      required: false
+      selector: *id003
+refresh:
+  name: Refresh cloud data
+  description: Refresh cloud inventory, settings and remote status.
+  fields:
+    device_id:
+      name: Charger
+      required: true
+      selector: *id001

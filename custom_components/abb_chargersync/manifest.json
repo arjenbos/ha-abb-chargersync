@@ -1,0 +1,14 @@
+{
+  "domain": "abb_chargersync",
+  "name": "ABB ChargerSync",
+  "codeowners": [
+    "@arjenbos"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/arjenbos/ha-abb-cybersync",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0",
+  "issue_tracker": "https://github.com/arjenbos/ha-abb-cybersync/issues"
+}
