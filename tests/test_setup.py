@@ -47,6 +47,7 @@ async def test_full_setup_entities_services_dynamic_devices_and_unload(hass):
     async def read(device_id, resource, **kwargs):
         return {
             "schedules": [],
+            "sessions": [],
             "price": {"averagePrice": "0.3", "currencyType": 1},
             "sessions/auto-export": {},
             "latest-upgrade-packages": [],

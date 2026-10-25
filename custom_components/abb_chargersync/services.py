@@ -95,6 +95,7 @@ SCHEMAS = {
                     "log_info",
                     "logs",
                     "solar_offsets",
+                    "diagnostics",
                 ]
             ),
             vol.Optional("page", default=0): cv.positive_int,
@@ -175,7 +176,24 @@ async def execute(c, charger_id: int, service: str, data: dict):
     result = None
     if service == "get_data":
         resource = data["resource"]
-        if resource == "solar_offsets":
+        if resource == "diagnostics":
+            snapshot = c.data[charger_id]
+            result = {
+                "model": snapshot["device"].get("model"),
+                "firmware": snapshot["device"].get("softVersion"),
+                "cloud_online": snapshot["device"].get("online"),
+                "remote_available": snapshot.get("remote_available", False),
+                "state_fields": sorted(snapshot.get("state", {})),
+                "resources": sorted(snapshot.get("resources", {})),
+                "unsupported": sorted(c.controllers[charger_id].unsupported),
+                "settings_failures": snapshot.get("settings_failures", {}),
+                "remote_failure": {
+                    k: v
+                    for k, v in snapshot.get("remote_failure", {}).items()
+                    if k in {"stage", "error", "http_status"}
+                },
+            }
+        elif resource == "solar_offsets":
             result = parse_solar_offsets(
                 await c.controllers[charger_id].remote.query_configuration(12)
             )

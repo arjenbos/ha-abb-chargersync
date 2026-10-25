@@ -6,6 +6,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, modes
 
 from custom_components.abb_chargersync.api import UnsupportedError
 from custom_components.abb_chargersync.protocol import (
+    ConfigurationUnavailableError,
     Frame,
     FrameDecoder,
     ProtocolError,
@@ -66,8 +67,11 @@ def test_configuration_validation():
     assert configuration(struct.pack("<HBH", 10, 0, 4) + b"\1\0\0\1", 10) == b"\1\0\0\1"
     with pytest.raises(ProtocolError):
         configuration(b"\0", 10)
-    with pytest.raises(UnsupportedError):
+    with pytest.raises(ConfigurationUnavailableError):
         configuration(struct.pack("<HBH", 10, 1, 0), 10)
+    with pytest.raises(ConfigurationUnavailableError) as error:
+        configuration(struct.pack("<HB", 9, 1), 9)
+    assert error.value.result_code == 1
 
 
 def test_single_phase_measurements_and_idle_unknown():
@@ -138,3 +142,29 @@ def test_load_limit_settings_preserved():
     assert parse_limits(b"\0" + raw[1:]) == settings
     with pytest.raises(ProtocolError):
         parse_limits(b"\0")
+
+
+def test_status_accepts_firmware_extension_after_known_fields():
+    # The Android SDK reads the known prefix and permits trailing firmware fields.
+    body = b"\6" + struct.pack(
+        "<BIIIHIHIHIBIHHH",
+        1,
+        42,
+        2000,
+        23000,
+        1600,
+        23100,
+        1500,
+        23200,
+        1400,
+        600,
+        32,
+        1500,
+        1200,
+        1100,
+        1000,
+    )
+    assert len(body + b"\0") == 44
+    assert parse_solar_status(body + b"\0") == parse_solar_status(body)
+    with pytest.raises(ProtocolError):
+        parse_solar_status(body[:-1])

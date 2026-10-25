@@ -77,7 +77,7 @@ Notable duplication: `getActiveSessions` and `startSession` both use `POST api/v
 
 WebSocket host from `BuildConfig.WEBSOCKET_HOST`: `wss://abb.api.chargedot.com:18971`.
 
-`CDBleClient.init` constructs a login URL by appending `ws/login?t=<token>&v=1&e=<email>` to the host. The exact resulting URL, including the lack of a visible slash in the decompiled concatenation, requires implementation-time verification. Tokens and email addresses must stay out of diagnostic logs.
+`CDBleClient.init` normalizes the trailing slash and appends `ws/login?t=<sessionId>&v=1&e=<authen>`. Further inspection of `ui/base/BaseBluetoothFragment.java` confirms that these parameters come from `User.sessionId` and `User.authen`, not from the OAuth access token. Tokens and login identifiers must stay out of diagnostic logs.
 
 `WebSocketClientImpl` processes `login`, `update_device_status`, and `remote_control`. Requests are JSON objects containing `method: remote_control`, `to: <device_number>`, and `data: <binary_payload_as_hex>`. Replies include `data.deviceNumber` and `data.raw`. The client sends a JSON `ping` every 30 seconds. This transports device commands; it is not a conventional JSON REST interface for every setting.
 

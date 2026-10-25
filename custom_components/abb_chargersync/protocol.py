@@ -20,6 +20,14 @@ class ProtocolError(ChargerSyncError):
     """Malformed, rejected or incomplete device response."""
 
 
+class ConfigurationUnavailableError(ChargerSyncError):
+    """A configuration read was rejected for now, not proof of missing capability."""
+
+    def __init__(self, result_code: int) -> None:
+        super().__init__("Configuration currently unavailable")
+        self.result_code = result_code
+
+
 @dataclass(frozen=True)
 class Frame:
     command: int
@@ -101,13 +109,16 @@ def identity_token(body: bytes) -> bytes:
 
 
 def configuration(body: bytes, expected: int) -> bytes:
-    if len(body) < 5:
+    if len(body) < 3:
         raise ProtocolError("Truncated configuration reply")
-    kind, result, length = struct.unpack_from("<HBH", body)
+    kind, result = struct.unpack_from("<HB", body)
     if kind != expected:
         raise ProtocolError("Unexpected configuration type")
     if result:
-        raise UnsupportedError("Configuration not supported")
+        raise ConfigurationUnavailableError(result)
+    if len(body) < 5:
+        raise ProtocolError("Truncated configuration content length")
+    length = int.from_bytes(body[3:5], "little")
     if len(body) != length + 5:
         raise ProtocolError("Invalid configuration length")
     return body[5:]
@@ -130,8 +141,8 @@ def parse_status(body: bytes) -> dict:
         three_phase = body[1] != 0
         fmt = "<BIHIHIHIHIB" if three_phase else "<BIHIHIB"
         needed = struct.calcsize(fmt)
-        if len(body) != needed + 1:
-            raise ProtocolError("Invalid charging status length")
+        if len(body) < needed + 1:
+            raise ProtocolError(f"Invalid charging status length: {len(body)}, phase {body[1]}")
         values = struct.unpack_from(fmt, body, 1)
         result.update(
             phase_type=values[0],
@@ -166,8 +177,8 @@ def parse_solar_status(body: bytes) -> dict:
     three = body[1] != 0
     fmt = "<BII IHIHIHIBIHHH" if three else "<BIIIHIBIH"
     fmt = fmt.replace(" ", "")
-    if len(body) != struct.calcsize(fmt) + 1:
-        raise ProtocolError("Invalid solar status length")
+    if len(body) < struct.calcsize(fmt) + 1:
+        raise ProtocolError(f"Invalid solar status length: {len(body)}, phase {body[1]}")
     v = struct.unpack_from(fmt, body, 1)
     result = {
         "status_code": 6,

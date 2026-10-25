@@ -56,12 +56,16 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
                 "price",
                 "sessions/auto-export",
                 "latest-upgrade-packages",
+                "sessions",
             ):
                 key = (device_id, resource)
                 if key in self._optional_unsupported:
                     continue
                 try:
-                    snapshot["resources"][resource] = await self.client.read(device_id, resource)
+                    params = {"page": 0, "per_page": 20} if resource == "sessions" else {}
+                    snapshot["resources"][resource] = await self.client.read(
+                        device_id, resource, **params
+                    )
                 except UnsupportedError:
                     self._optional_unsupported.add(key)
                 except AuthenticationError:
@@ -83,7 +87,6 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
                     RemoteCharger(
                         self.client,
                         device["deviceNumber"],
-                        self.entry.data["username"],
                         lambda: int(dt_util.now().utcoffset().total_seconds() / 3600),
                     )
                 )
@@ -91,15 +94,31 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
             if device.get("online") == 0:
                 await controller.remote.close()
                 return result
+            read_stage = "status_decode"
             try:
                 result["state"] = await controller.status()
                 result["remote_available"] = True
+                read_stage = "settings_decode"
                 result["state"].update(await controller.settings())
+                result["settings_failures"] = controller.read_failures
+                previous = (self.data or {}).get(device_id, {}).get("settings_failures", {})
+                if previous != result["settings_failures"] and result["settings_failures"]:
+                    _LOGGER.warning(
+                        "Some charger settings could not be read: %s", result["settings_failures"]
+                    )
             except AuthenticationError as err:
                 raise ConfigEntryAuthFailed("ChargerSync sign-in expired") from err
-            except ChargerSyncError:
-                # Keep any successful status update. Settings are independently unavailable.
+            except ChargerSyncError as err:
+                # Keep any successful status update. Never include vendor payloads or credentials.
                 result["remote_error"] = True
+                result["remote_failure"] = controller.remote.last_error or {
+                    "stage": read_stage,
+                    "error": type(err).__name__,
+                    "detail": str(err) if type(err).__name__ == "ProtocolError" else "",
+                }
+                previous = (self.data or {}).get(device_id, {}).get("remote_failure")
+                if previous != result["remote_failure"]:
+                    _LOGGER.warning("Charger remote read failed: %s", result["remote_failure"])
             return result
 
     async def _async_update_data(self) -> dict[int, dict]:

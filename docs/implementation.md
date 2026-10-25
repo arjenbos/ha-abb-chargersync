@@ -21,7 +21,7 @@ Unencrypted protocol frames contain eight header bytes, eight device-token bytes
 
 After WSS login, device authentication and time synchronization follow the Android SDK sequence. The returned device token remains in memory only. Bluetooth cipher material is not required.
 
-The URL uses `/ws/login`. The decompiled concatenation appears to omit a slash, so the default URL has been reconstructed and has not been confirmed against the live server. Tests validate framing and behavior against an emulator, not acceptance of this URL and handshake by the real ABB server.
+The URL uses `/ws/login`. `CDBleClient.init` normalizes the trailing slash before appending this path. `BaseBluetoothFragment` supplies `User.authen` as the `e` parameter and `User.sessionId` as the `t` parameter. These are distinct from the REST OAuth access token. The client retrieves this pair from the authenticated user-profile endpoint and keeps it only in memory; rejected remote sessions invalidate that cache. Tests explicitly assert that the WebSocket uses the profile session rather than the OAuth token.
 
 `getActiveSessions` and `startSession` share the same POST path in the APK. The integration never uses this path to read status. Start and stop operations use explicit device commands.
 
@@ -29,7 +29,7 @@ Measurement scaling follows the SDK parsers: legacy session energy /100 kWh, sol
 
 ## Limitations
 
-- No live cloud or charger testing has been performed. Compatibility and write effects remain experimental.
+- Live read-only testing has confirmed cloud authentication, remote status, current-limit reading, and several configuration reads on one charger with firmware 1.8.37. Write effects and broader hardware compatibility remain experimental.
 - Not every SDK capability is an app feature. Installer configuration is not exposed through arbitrary cloud actions.
 - The official app requires Bluetooth for firmware installation and network settings; both are excluded.
 - Different connectors/ports are not modeled as separate charge points. The investigated app reads status for port 0; current control uses the port returned by the device. Multiport chargers require additional validation.

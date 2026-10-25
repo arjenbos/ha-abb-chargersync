@@ -13,15 +13,16 @@ from custom_components.abb_chargersync.websocket import RemoteCharger
 pytestmark = pytest.mark.usefixtures("socket_enabled")
 
 
-async def test_cloud_handshake_fragmentation_and_cleanup(aiohttp_client, monkeypatch):
+@pytest.mark.parametrize("reply_code", [0, "0"])
+async def test_cloud_handshake_fragmentation_and_cleanup(aiohttp_client, monkeypatch, reply_code):
     commands = []
 
     async def handler(request):
-        assert request.query["t"] == "access"
+        assert request.query["t"] == "vendor-session"
         assert request.query["e"] == "test+charger@example.com"
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        await ws.send_json({"method": "login", "code": 0})
+        await ws.send_json({"method": "login", "code": reply_code})
         async for msg in ws:
             data = json.loads(msg.data)
             if data["method"] == "ping":
@@ -40,7 +41,7 @@ async def test_cloud_handshake_fragmentation_and_cleanup(aiohttp_client, monkeyp
                 await ws.send_json(
                     {
                         "method": "remote_control",
-                        "code": 0,
+                        "code": reply_code,
                         "data": {"deviceNumber": "TEST", "raw": part.hex()},
                     }
                 )
@@ -54,9 +55,12 @@ async def test_cloud_handshake_fragmentation_and_cleanup(aiohttp_client, monkeyp
         str(server.make_url("/ws/login")).replace("http:", "ws:"),
     )
     client = Mock(
-        session=server.session, token={"access_token": "access"}, ensure_token=AsyncMock()
+        session=server.session,
+        token={"access_token": "access"},
+        ensure_token=AsyncMock(),
+        remote_credentials=AsyncMock(return_value=("test+charger@example.com", "vendor-session")),
     )
-    remote = RemoteCharger(client, "TEST", "test+charger@example.com")
+    remote = RemoteCharger(client, "TEST")
     assert await remote.command(181, b"\0") == b"\0"
     assert await remote.command(181, b"\0") == b"\0"
     assert commands == [254, 176, 181, 181]
@@ -65,7 +69,7 @@ async def test_cloud_handshake_fragmentation_and_cleanup(aiohttp_client, monkeyp
 
 
 async def test_mutation_timeout_does_not_retry_and_closes():
-    remote = RemoteCharger(Mock(), "TEST", "a@example.com")
+    remote = RemoteCharger(Mock(), "TEST")
     remote._connect = AsyncMock()
     remote._exchange = AsyncMock(side_effect=TimeoutError)
     remote.close = AsyncMock()

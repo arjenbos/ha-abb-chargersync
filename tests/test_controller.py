@@ -70,3 +70,20 @@ async def test_solar_offset_patch_preserves_other_fields():
     expected = bytearray(original)
     struct.pack_into("<f", expected, 10, 2.5)
     remote.configure.assert_awaited_once_with(5, bytes(expected))
+
+
+async def test_settings_failure_does_not_hide_other_capabilities():
+    remote = AsyncMock()
+    remote.command.return_value = b"\x00\x20\x10\x00"
+
+    async def read(kind):
+        return {9: b"\x01", 10: b"\x01\x00\x1e\x01", 38: b"\x00\x00", 3: b"\x02"}[kind]
+
+    remote.query_configuration.side_effect = read
+    c = ChargerController(remote)
+    result = await c.settings()
+    assert result["current_limit"] == 16
+    assert result["maximum_current"] == 32
+    assert result["default_mode"] == "max_speed"
+    assert result["cable_locked"] is False
+    assert c.read_failures == {"eco_threshold": {"error": "ProtocolError", "response_length": 2}}

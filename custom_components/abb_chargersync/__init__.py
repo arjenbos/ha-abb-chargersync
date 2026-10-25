@@ -9,6 +9,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ChargerSyncClient
 from .coordinator import ChargerSyncCoordinator
+from .frontend import async_setup_frontend
 from .services import async_register_services
 
 PLATFORMS = [
@@ -33,6 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ChargerSyncConfigEntry) 
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
         async_register_services(hass)
+        await async_setup_frontend(hass)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except BaseException:
         await coordinator.async_close()

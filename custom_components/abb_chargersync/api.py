@@ -37,6 +37,10 @@ class ChargerSyncClient:
         self.token = dict(token or {})
         self.on_token = on_token
         self._refresh_lock = asyncio.Lock()
+        self._identity_lock = asyncio.Lock()
+        self._remote_identity: tuple[str, str] | None = None
+        self._identity_access: str | None = None
+        self._identity_expires = 0.0
 
     async def login(self, username: str, password: str) -> None:
         await self._token_request(
@@ -198,3 +202,31 @@ class ChargerSyncClient:
         }
         body["aliasNumber"] = name
         return await self._request("POST", f"api/v2/devices/{device_id}", json=body)
+
+    def invalidate_remote_credentials(self) -> None:
+        """Discard a rejected vendor session without discarding REST OAuth tokens."""
+        self._remote_identity = None
+
+    async def remote_credentials(self) -> tuple[str, str]:
+        """Return the profile authen/sessionId pair used by the official app's WSS login."""
+        await self.ensure_token()
+        async with self._identity_lock:
+            if (
+                self._remote_identity is not None
+                and self._identity_access == self.token.get("access_token")
+                and self._identity_expires > time.monotonic()
+            ):
+                return self._remote_identity
+            user = await self.user()
+            authen, session_id = user.get("authen"), user.get("sessionId")
+            if (
+                not isinstance(authen, str)
+                or not authen
+                or not isinstance(session_id, str)
+                or not session_id
+            ):
+                raise ChargerSyncError("User profile is missing remote session credentials")
+            self._remote_identity = (authen, session_id)
+            self._identity_access = self.token.get("access_token")
+            self._identity_expires = time.monotonic() + 300
+            return self._remote_identity

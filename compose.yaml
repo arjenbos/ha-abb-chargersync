@@ -1,0 +1,47 @@
+name: abb-chargersync-dev
+
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:${HA_VERSION:-2026.10.3}
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+    ports:
+      - "127.0.0.1:${HA_PORT:-8123}:8123"
+    volumes:
+      # Persistent local accounts, integration tokens, logs, and Recorder database.
+      - type: bind
+        source: ./.local/homeassistant
+        target: /config
+      # Keep the development configuration in version control, separate from secrets.
+      - type: bind
+        source: ./development/configuration.yaml
+        target: /config/configuration.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      # Code changes are visible immediately; restart HA to reload Python modules.
+      - type: bind
+        source: ./custom_components/abb_chargersync
+        target: /config/custom_components/abb_chargersync
+        read_only: true
+        bind:
+          create_host_path: false
+      # The included Lovelace header uses /local/abb_chargersync/icon.png.
+      - type: bind
+        source: ./custom_components/abb_chargersync/brand
+        target: /config/www/abb_chargersync
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8123/', timeout=5).read(1)"
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5

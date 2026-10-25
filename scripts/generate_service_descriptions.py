@@ -1,8 +1,13 @@
+import sys
 from pathlib import Path
 
 import yaml
 
-from custom_components.abb_chargersync.services import SCHEMAS
+ROOT = Path(__file__).resolve().parents[1]
+# Direct script execution adds scripts/, so make the project package importable.
+sys.path.insert(0, str(ROOT))
+
+from custom_components.abb_chargersync.services import SCHEMAS  # noqa: E402
 
 
 def field(name, selector, required=False, description=None):
@@ -123,6 +128,6 @@ for name, schema in SCHEMAS.items():
         value["required"] = type(marker).__name__ == "Required"
         fs[key] = value
     services[name] = {"name": desc[name][0], "description": desc[name][1], "fields": fs}
-Path("custom_components/abb_chargersync/services.yaml").write_text(
+(ROOT / "custom_components/abb_chargersync/services.yaml").write_text(
     yaml.safe_dump(services, sort_keys=False, allow_unicode=True)
 )

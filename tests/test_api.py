@@ -101,3 +101,28 @@ async def test_malformed_inventory_and_no_password_storage():
     client._request = AsyncMock(return_value={"data": []})
     with pytest.raises(ChargerSyncError):
         await client.devices()
+
+
+async def test_websocket_credentials_use_profile_session_not_oauth():
+    client = ChargerSyncClient(
+        Mock(), {"access_token": "oauth-secret", "expires_at": time.time() + 3600}
+    )
+    client.user = AsyncMock(
+        return_value={"id": 42, "authen": "profile-login", "sessionId": "vendor-session"}
+    )
+    assert await client.remote_credentials() == ("profile-login", "vendor-session")
+    assert await client.remote_credentials() == ("profile-login", "vendor-session")
+    client.user.assert_awaited_once()
+    assert client.token["access_token"] == "oauth-secret"
+    client.invalidate_remote_credentials()
+    await client.remote_credentials()
+    assert client.user.await_count == 2
+
+
+async def test_missing_profile_session_never_falls_back_to_oauth():
+    client = ChargerSyncClient(
+        Mock(), {"access_token": "oauth-secret", "expires_at": time.time() + 3600}
+    )
+    client.user = AsyncMock(return_value={"id": 42, "authen": "profile-login"})
+    with pytest.raises(ChargerSyncError, match="missing remote session"):
+        await client.remote_credentials()

@@ -78,6 +78,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             yield FirmwareAvailableSensor(
                 c, i, "available_firmware", "Available firmware", remote=False
             )
+        for key in RESOURCE_SENSORS:
+            yield ResourceSensor(c, i, key)
 
     discover(entry, async_add_entities, factory)
 
@@ -114,3 +116,64 @@ class FirmwareAvailableSensor(FirmwareSensor):
         # Do not guess which of multiple hardware-specific packages is the latest.
         versions = sorted({p["softVersion"] for p in packages if p.get("softVersion")})
         return versions[0] if len(versions) == 1 else None
+
+
+RESOURCE_SENSORS = {
+    "schedule_count": ("Charging schedules", "schedules", None, None),
+    "recent_session_count": ("Recent sessions", "sessions", None, None),
+    "last_session_energy": ("Last session energy", "sessions", "energy", "kWh"),
+    "last_session_duration": ("Last session duration", "sessions", "duration", "s"),
+    "last_session_cost": ("Last session cost", "sessions", "cost", None),
+}
+
+
+class ResourceSensor(ChargerSyncEntity, SensorEntity):
+    """Small cloud summaries; history and personal information stay out of attributes."""
+
+    def __init__(self, coordinator, device_id, key):
+        name, self.resource, self.field, unit = RESOURCE_SENSORS[key]
+        super().__init__(coordinator, device_id, key, name, remote=False)
+        self._attr_native_unit_of_measurement = unit
+        if key == "last_session_energy":
+            self._attr_device_class = SensorDeviceClass.ENERGY
+        elif key == "last_session_duration":
+            self._attr_device_class = SensorDeviceClass.DURATION
+
+    @property
+    def records(self):
+        value = self.snapshot.get("resources", {}).get(self.resource)
+        if isinstance(value, dict):
+            value = value.get("data")
+        return (
+            value if isinstance(value, list) and all(isinstance(r, dict) for r in value) else None
+        )
+
+    @property
+    def available(self):
+        return super().available and self.records is not None
+
+    @property
+    def native_value(self):
+        records = self.records
+        if records is None:
+            return None
+        if self.field is None:
+            return len(records)
+        # Select by the observed API timestamp, without assuming server ordering.
+        completed = [r for r in records if r.get("stopTime")]
+        last = max(completed, key=lambda r: str(r["stopTime"]), default={})
+        value = last.get(self.field)
+        try:
+            return float(value) if value is not None else None
+        except TypeError, ValueError:
+            return None
+
+    @property
+    def extra_state_attributes(self):
+        if self.key == "recent_session_count":
+            return {"scope": "Most recent page, up to 20 sessions"}
+        if self.key == "last_session_cost":
+            completed = [r for r in self.records or [] if r.get("stopTime")]
+            last = max(completed, key=lambda r: str(r["stopTime"]), default={})
+            return {"currency_id": last.get("currencyType"), "source": "ChargerSync"}
+        return None

@@ -11,7 +11,7 @@ from contextlib import suppress
 import aiohttp
 from yarl import URL
 
-from .api import AuthenticationError, ChargerSyncClient, ChargerSyncError, UnsupportedError
+from .api import ChargerSyncClient, ChargerSyncError, UnsupportedError
 from .const import REQUEST_TIMEOUT, WS_URL
 from .protocol import (
     FrameDecoder,
@@ -28,12 +28,10 @@ class RemoteCharger:
         self,
         client: ChargerSyncClient,
         number: str,
-        email: str,
         timezone_offset: Callable[[], int] | None = None,
     ) -> None:
         self.client = client
         self.number = number
-        self.email = email
         self.timezone_offset = timezone_offset
         self._lock = asyncio.Lock()
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -41,6 +39,8 @@ class RemoteCharger:
         self._access: str | None = None
         self._decoder = FrameDecoder()
         self._ping_task: asyncio.Task | None = None
+        self.stage = "disconnected"
+        self.last_error: dict[str, str | int] | None = None
 
     async def close(self) -> None:
         if self._ping_task:
@@ -53,6 +53,14 @@ class RemoteCharger:
             self._ws = None
         self._decoder = FrameDecoder()
         self._token = bytes(8)
+
+    @staticmethod
+    def _reply_code(response: dict) -> int:
+        """Match JSONObject.optInt: accept numeric strings as well as JSON numbers."""
+        try:
+            return int(response.get("code", -1))
+        except ValueError, TypeError:
+            return -1
 
     async def _receive(self) -> dict:
         assert self._ws is not None
@@ -68,22 +76,28 @@ class RemoteCharger:
         return data
 
     async def _connect(self) -> None:
+        self.stage = "token_refresh"
         await self.client.ensure_token()
         access = self.client.token["access_token"]
         if self._ws and not self._ws.closed and self._access == access:
             return
         await self.close()
-        url = URL(WS_URL).with_query(t=access, v=1, e=self.email)
+        self.stage = "remote_credentials"
+        authen, session_id = await self.client.remote_credentials()
+        url = URL(WS_URL).with_query(t=session_id, v=1, e=authen)
+        self.stage = "websocket_open"
         self._ws = await self.client.session.ws_connect(url, max_msg_size=32768)
         self._access = access
+        self.stage = "cloud_login"
         while True:
             response = await self._receive()
             if response.get("method") == "login":
-                if response.get("code") in (401, 403):
-                    raise AuthenticationError("Remote login expired")
-                if response.get("code") != 0:
+                code = self._reply_code(response)
+                if code != 0:
+                    self.client.invalidate_remote_credentials()
                     raise ChargerSyncError("Remote login rejected")
                 break
+        self.stage = "device_authentication"
         body = await self._exchange(254, identity_body(self.number))
         self._token = identity_token(body)
         # Match SDK connection initialization; time sync has no charging side effects.
@@ -92,6 +106,7 @@ class RemoteCharger:
         )
         if self.timezone_offset is not None:
             offset = self.timezone_offset()
+        self.stage = "time_sync"
         await self._exchange(176, struct.pack("<IB", int(time.time()), offset + 12))
         self._ping_task = asyncio.create_task(self._ping())
 
@@ -123,9 +138,11 @@ class RemoteCharger:
                 continue
             if method != "remote_control":
                 continue
-            if response.get("code") == 401:
-                raise AuthenticationError("Remote account session expired")
-            if response.get("code") != 0:
+            code = self._reply_code(response)
+            if code == 401:
+                self.client.invalidate_remote_credentials()
+                raise ChargerSyncError("Remote account session expired")
+            if code != 0:
                 raise ChargerSyncError("Remote command rejected")
             data = response.get("data")
             if not isinstance(data, dict) or data.get("deviceNumber") != self.number:
@@ -149,13 +166,24 @@ class RemoteCharger:
             try:
                 async with asyncio.timeout(REQUEST_TIMEOUT):
                     await self._connect()
-                    return await self._exchange(command, body, subtype)
-            except aiohttp.ClientError, TimeoutError, ConnectionError, RuntimeError:
+                    self.stage = f"command_{command:02x}"
+                    result = await self._exchange(command, body, subtype)
+                    self.stage = "ready"
+                    self.last_error = None
+                    return result
+            except (aiohttp.ClientError, TimeoutError, ConnectionError, RuntimeError) as err:
+                self.last_error = {"stage": self.stage, "error": type(err).__name__}
+                if isinstance(err, aiohttp.WSServerHandshakeError):
+                    self.last_error["http_status"] = err.status
                 await self.close()
                 raise ChargerSyncError("Remote command failed; outcome may be unknown") from None
             except UnsupportedError:
                 raise
-            except BaseException:
+            except asyncio.CancelledError:
+                await self.close()
+                raise
+            except Exception as err:
+                self.last_error = {"stage": self.stage, "error": type(err).__name__}
                 await self.close()
                 raise
 

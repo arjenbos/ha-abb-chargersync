@@ -1,0 +1,842 @@
+title: ChargerSync
+views:
+- title: Charging
+  path: charging
+  icon: mdi:ev-station
+  type: sections
+  max_columns: 3
+  header:
+    layout: start
+    badges_position: bottom
+    card:
+      type: markdown
+      text_only: true
+      content: '<img src="/local/abb_chargersync/icon.png" alt="ChargerSync" width="48"
+        height="48">
+
+
+        # CHARGER_DISPLAY_NAME
+
+        {% set status = states(''sensor.charger_charging_status'') %}
+
+        {% set labels = {''available'': ''Ready to charge'', ''plugged_in'': ''Vehicle
+        connected'', ''waiting'': ''Waiting to charge'', ''reserved'': ''Reserved'',
+        ''suspended_evse'': ''Paused by charger'', ''suspended_ev'': ''Paused by vehicle'',
+        ''charging'': ''Charging your vehicle'', ''pausing'': ''Pausing'', ''finished'':
+        ''Session finished'', ''unavailable'': ''Charger unavailable'', ''faulted'':
+        ''Charger needs attention''} %}
+
+        {% if is_state(''binary_sensor.charger_remote_connected'', ''on'') %}
+
+        {{ labels.get(status, ''Waiting for charger status'') }}
+
+        {% else %}
+
+        Waiting for a cloud connection
+
+        {% endif %}'
+  badges:
+  - type: entity
+    entity: binary_sensor.charger_cloud_online
+    name: Cloud
+    show_name: true
+    show_state: true
+  - type: entity
+    entity: binary_sensor.charger_remote_connected
+    name: Remote
+    show_name: true
+    show_state: true
+  - type: entity
+    entity: binary_sensor.charger_charging
+    name: Charging
+    show_name: true
+    show_state: true
+  sections:
+  - type: grid
+    cards:
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'off'
+      card:
+        type: markdown
+        content: '## Charger offline
+
+          Charging controls will return when the cloud connection is restored. Check
+          the charger and its connection in the official app.'
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_fault
+        state: 'on'
+      card:
+        type: markdown
+        content: '## Charging fault
+
+          The charger has reported a fault. Check the diagnostics view and the official
+          app.'
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: heading
+      heading: This session
+      icon: mdi:lightning-bolt
+    - type: tile
+      entity: sensor.charger_charging_status
+      name: Charging status
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: more-info
+      icon: mdi:ev-station
+      color: blue
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_session_energy
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_session_energy
+        name: Energy delivered
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:battery-charging
+        color: blue
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_session_duration
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_session_duration
+        name: Charging time
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:timer-outline
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_apparent_power
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_apparent_power
+        name: Apparent power
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:flash
+        color: amber
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_session_solar_energy
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_session_solar_energy
+        name: Solar energy
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:white-balance-sunny
+        color: green
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_apparent_power
+        above: -1
+      card:
+        type: history-graph
+        title: Apparent power · last 8 hours
+        hours_to_show: 8
+        entities:
+        - entity: sensor.charger_apparent_power
+          name: Apparent power · last 8 hours
+      grid_options:
+        columns: 12
+        rows: auto
+  - type: grid
+    cards:
+    - type: heading
+      heading: Charge control
+      icon: mdi:ev-plug-type2
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      card:
+        type: tile
+        entity: button.charger_start_charging
+        name: Start charging
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.charger_start_charging
+        icon_tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.charger_start_charging
+        icon: mdi:play
+        color: green
+        hide_state: true
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      card:
+        type: tile
+        entity: button.charger_stop_charging
+        name: Stop charging
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.charger_stop_charging
+        icon_tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.charger_stop_charging
+        icon: mdi:stop
+        color: red
+        hide_state: true
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: number.charger_charging_current_limit
+        above: -1
+      card:
+        type: tile
+        entity: number.charger_charging_current_limit
+        name: Current limit
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:current-ac
+        color: blue
+        features:
+        - type: numeric-input
+          style: slider
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: state
+        entity: select.charger_default_charging_mode
+        state:
+        - max_speed
+        - eco_mix
+        - solar
+      card:
+        type: tile
+        entity: select.charger_default_charging_mode
+        name: Default mode
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:calendar-clock
+        features:
+        - type: select-options
+          style: dropdown
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: state
+        entity: select.charger_active_charging_mode
+        state:
+        - max_speed
+        - eco_mix
+        - solar
+      card:
+        type: tile
+        entity: select.charger_active_charging_mode
+        name: Current session mode
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:tune-variant
+        features:
+        - type: select-options
+          style: dropdown
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: state
+        entity: lock.charger_charging_cable
+        state:
+        - locked
+        - unlocked
+      card:
+        type: tile
+        entity: lock.charger_charging_cable
+        name: Charging cable
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:lock-outline
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      card:
+        type: tile
+        entity: button.charger_skip_charging_delay
+        name: Skip charging delay
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.charger_skip_charging_delay
+        icon_tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.charger_skip_charging_delay
+        icon: mdi:timer-play-outline
+        color: amber
+        hide_state: true
+      grid_options:
+        columns: 6
+        rows: auto
+  - type: grid
+    cards:
+    - type: heading
+      heading: Solar charging
+      icon: mdi:solar-power-variant
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: state
+        entity: switch.charger_solar_charging_enabled
+        state:
+        - 'on'
+        - 'off'
+      card:
+        type: tile
+        entity: switch.charger_solar_charging_enabled
+        name: Solar charging
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:solar-power
+        features:
+        - type: toggle
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_session_solar_share
+        above: -1
+      card:
+        type: gauge
+        entity: sensor.charger_session_solar_share
+        name: Solar share of this session
+        min: 0
+        max: 100
+        needle: true
+        severity:
+          red: 0
+          yellow: 30
+          green: 70
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: state
+        entity: select.charger_default_charging_mode
+        state: eco_mix
+      - condition: numeric_state
+        entity: number.charger_eco_mix_minimum_current
+        above: -1
+      card:
+        type: tile
+        entity: number.charger_eco_mix_minimum_current
+        name: Eco mix minimum current
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:current-ac
+        color: green
+        features:
+        - type: numeric-input
+          style: buttons
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: state
+        entity: switch.charger_ignore_eco_mix_start_stop_threshold
+        state:
+        - 'on'
+        - 'off'
+      card:
+        type: tile
+        entity: switch.charger_ignore_eco_mix_start_stop_threshold
+        name: Ignore Eco mix threshold
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:tune
+        features:
+        - type: toggle
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: markdown
+      content: '**Choose how to charge**
+
+
+        **Solar** uses excess solar energy.
+
+
+        **Eco mix** adds grid energy when needed.
+
+
+        **Max speed** uses the highest available charging speed.'
+- title: Diagnostics
+  path: diagnostics
+  icon: mdi:chart-line
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Electrical readings
+      icon: mdi:sine-wave
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_voltage_l1
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_voltage_l1
+        name: Voltage L1
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:flash-triangle-outline
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_current_l1
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_current_l1
+        name: Current L1
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:current-ac
+        color: blue
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_solar_current_l1
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_solar_current_l1
+        name: Solar current L1
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:solar-power
+        color: green
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_current_l1
+        above: -1
+      card:
+        type: history-graph
+        title: Current L1 · last 8 hours
+        hours_to_show: 8
+        entities:
+        - entity: sensor.charger_current_l1
+          name: Current L1 · last 8 hours
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_voltage_l2
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_voltage_l2
+        name: Voltage L2
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:flash-triangle-outline
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_current_l2
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_current_l2
+        name: Current L2
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:current-ac
+        color: blue
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_solar_current_l2
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_solar_current_l2
+        name: Solar current L2
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:solar-power
+        color: green
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_current_l2
+        above: -1
+      card:
+        type: history-graph
+        title: Current L2 · last 8 hours
+        hours_to_show: 8
+        entities:
+        - entity: sensor.charger_current_l2
+          name: Current L2 · last 8 hours
+      grid_options:
+        columns: 12
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_voltage_l3
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_voltage_l3
+        name: Voltage L3
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:flash-triangle-outline
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_current_l3
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_current_l3
+        name: Current L3
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:current-ac
+        color: blue
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_solar_current_l3
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_solar_current_l3
+        name: Solar current L3
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:solar-power
+        color: green
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_current_l3
+        above: -1
+      card:
+        type: history-graph
+        title: Current L3 · last 8 hours
+        hours_to_show: 8
+        entities:
+        - entity: sensor.charger_current_l3
+          name: Current L3 · last 8 hours
+      grid_options:
+        columns: 12
+        rows: auto
+  - type: grid
+    cards:
+    - type: heading
+      heading: Connection & device
+      icon: mdi:lan-connect
+    - type: tile
+      entity: binary_sensor.charger_cloud_online
+      name: Cloud connection
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: more-info
+      icon: mdi:cloud-outline
+    - type: tile
+      entity: binary_sensor.charger_remote_connected
+      name: Remote connection
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: more-info
+      icon: mdi:connection
+    - type: tile
+      entity: binary_sensor.charger_fault
+      name: Charging fault
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: more-info
+      icon: mdi:alert-circle-outline
+    - type: tile
+      entity: sensor.charger_firmware
+      name: Installed firmware
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: more-info
+      icon: mdi:chip
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_maximum_current
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_maximum_current
+        name: Hardware current limit
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:current-ac
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.charger_remote_connected
+        state: 'on'
+      - condition: numeric_state
+        entity: sensor.charger_fault_code
+        above: -1
+      card:
+        type: tile
+        entity: sensor.charger_fault_code
+        name: Fault code
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        icon: mdi:alert-outline
+        color: red
+      grid_options:
+        columns: 6
+        rows: auto
+    - type: history-graph
+      title: Connection history
+      hours_to_show: 24
+      entities:
+      - entity: binary_sensor.charger_cloud_online
+        name: Cloud
+      - entity: binary_sensor.charger_remote_connected
+        name: Remote
+    - type: markdown
+      content: '**Reading the measurements**
+
+
+        Power is apparent power in VA, not active power in W. Session readings are
+        hidden when the charger does not report them.
+
+
+        Firmware installation and network setup remain in the official app.'
+- title: Management
+  path: management
+  icon: mdi:calendar-clock
+  type: panel
+  cards:
+  - type: custom:chargersync-card
+    entity: sensor.charger_charging_status
+    title: CHARGER_DISPLAY_NAME management

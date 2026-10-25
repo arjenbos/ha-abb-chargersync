@@ -1,0 +1,15 @@
+# Minimal configuration for the isolated local development instance.
+default_config:
+
+homeassistant:
+  name: ChargerSync development
+  time_zone: !env_var TZ
+
+# Keep the container port fixed even if a future image changes its default.
+http:
+  server_port: 8123
+
+logger:
+  default: warning
+  logs:
+    custom_components.abb_chargersync: info

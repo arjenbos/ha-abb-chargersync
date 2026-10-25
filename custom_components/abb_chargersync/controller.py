@@ -6,7 +6,7 @@ import asyncio
 import struct
 from collections.abc import Awaitable, Callable
 
-from .api import UnsupportedError
+from .api import AuthenticationError, ChargerSyncError, UnsupportedError
 from .const import MODES
 from .protocol import ProtocolError, encode_limits, parse_limits, parse_solar_status, parse_status
 from .websocket import RemoteCharger
@@ -16,6 +16,7 @@ class ChargerController:
     def __init__(self, remote: RemoteCharger) -> None:
         self.remote = remote
         self.unsupported: set[str] = set()
+        self.read_failures: dict[str, dict] = {}
         self._write_lock = asyncio.Lock()
 
     async def optional(self, name: str, read: Callable[[], Awaitable]) -> object | None:
@@ -35,46 +36,69 @@ class ChargerController:
         return parse_status(await self.remote.command(181, b"\0"))
 
     async def settings(self) -> dict:
+        """Keep successful settings even when another capability cannot be read."""
         result = {}
-        power = await self.optional("power", lambda: self.remote.command(224))
-        if power is not None:
-            if len(power) != 3:
-                raise ProtocolError("Invalid current limit response")
-            result.update(port=power[0], maximum_current=power[1], current_limit=power[2])
+        self.read_failures = {}
         for key, kind in (
+            ("power", None),
             ("active_mode", 9),
             ("default_mode", 10),
             ("eco_threshold", 38),
             ("cable", 3),
         ):
-            data = await self.optional(key, lambda k=kind: self.remote.query_configuration(k))
-            if data is None:
-                continue
-            if key == "active_mode":
-                if not data or data[0] not in MODES.values():
-                    raise ProtocolError("Invalid active mode")
-                result["active_mode"] = next(k for k, v in MODES.items() if v == data[0])
-            elif key == "default_mode":
-                if (
-                    len(data) < 4
-                    or data[3] not in MODES.values()
-                    or (data[3] == 2 and len(data) < 5)
-                ):
-                    raise ProtocolError("Invalid default mode")
-                result.update(
-                    default_mode=next(k for k, v in MODES.items() if v == data[3]),
-                    solar_enabled=bool(data[0]),
-                    solar_delay=data[2],
-                    solar_min_current=data[4] if data[3] == 2 else 0,
-                )
-            elif key == "eco_threshold":
-                if len(data) != 1:
-                    raise ProtocolError("Invalid threshold configuration")
-                result["ignore_eco_threshold"] = bool(data[0])
-            elif key == "cable":
-                if len(data) == 1 and data[0] in (1, 2):
-                    result["cable_locked"] = data[0] == 1
+            data = None
+            try:
+                if kind is None:
+                    data = await self.optional(key, lambda: self.remote.command(224))
+                else:
+                    data = await self.optional(
+                        key, lambda k=kind: self.remote.query_configuration(k)
+                    )
+                if data is not None:
+                    result.update(self._parse_setting(key, data))
+            except AuthenticationError:
+                raise
+            except ChargerSyncError as err:
+                failure = {"error": type(err).__name__}
+                if isinstance(getattr(err, "result_code", None), int):
+                    failure["result_code"] = err.result_code
+                if isinstance(data, bytes):
+                    failure["response_length"] = len(data)
+                if isinstance(self.remote.last_error, dict):
+                    failure.update(self.remote.last_error)
+                self.read_failures[key] = failure
         return result
+
+    @staticmethod
+    def _parse_setting(key: str, data: bytes) -> dict:
+        if key == "power":
+            if not 3 <= len(data) <= 6:
+                raise ProtocolError("Invalid current limit response")
+            return {
+                "port": data[0],
+                "maximum_current": data[1],
+                "current_limit": int.from_bytes(data[2:], "little"),
+            }
+        if key == "active_mode":
+            if not data or data[0] not in MODES.values():
+                raise ProtocolError("Invalid active mode")
+            return {"active_mode": next(k for k, v in MODES.items() if v == data[0])}
+        if key == "default_mode":
+            if len(data) < 4 or data[3] not in MODES.values() or (data[3] == 2 and len(data) < 5):
+                raise ProtocolError("Invalid default mode")
+            return {
+                "default_mode": next(k for k, v in MODES.items() if v == data[3]),
+                "solar_enabled": bool(data[0]),
+                "solar_delay": data[2],
+                "solar_min_current": data[4] if data[3] == 2 else 0,
+            }
+        if key == "eco_threshold":
+            if len(data) != 1:
+                raise ProtocolError("Invalid threshold configuration")
+            return {"ignore_eco_threshold": bool(data[0])}
+        if key == "cable" and len(data) == 1 and data[0] in (1, 2):
+            return {"cable_locked": data[0] == 1}
+        return {}
 
     async def simple(self, command: int, body: bytes = b"") -> None:
         result = await self.remote.command(command, body)
@@ -88,7 +112,8 @@ class ChargerController:
     async def set_current(self, current: int) -> None:
         async with self._write_lock:
             power = await self.remote.command(224)
-            if len(power) != 3 or not 6 <= current <= power[1]:
+            parsed = self._parse_setting("power", power)
+            if not 6 <= current <= parsed["maximum_current"]:
                 raise ProtocolError("Current outside device limits")
             await self.simple(192, bytes((power[0], current)))
 
@@ -131,8 +156,7 @@ class ChargerController:
         async with self._write_lock:
             settings = parse_limits(await self.remote.command(164, b"\0"))
             power = await self.remote.command(224)
-            if len(power) != 3:
-                raise ProtocolError("Cannot determine maximum current")
+            self._parse_setting("power", power)
             for r in ranges:
                 if not (
                     1 <= r["weekdays"] <= 127

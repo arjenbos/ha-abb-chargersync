@@ -13,3 +13,6 @@ htmlcov/
 work/
 *.apk
 *.xapk
+
+# Local Home Assistant development data, including account tokens.
+.local/
