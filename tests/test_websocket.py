@@ -8,7 +8,7 @@ from aiohttp import web
 
 from custom_components.abb_chargersync.api import ChargerSyncError
 from custom_components.abb_chargersync.protocol import FrameDecoder, encode
-from custom_components.abb_chargersync.websocket import RemoteCharger
+from custom_components.abb_chargersync.websocket import RemoteCharger, RemoteError
 
 pytestmark = pytest.mark.usefixtures("socket_enabled")
 
@@ -77,3 +77,29 @@ async def test_mutation_timeout_does_not_retry_and_closes():
         await remote.command(180, b"\0\0")
     remote._exchange.assert_awaited_once()
     remote.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [RemoteError("login_rejected", 401), RemoteError("connection_closed", 1008), TimeoutError()],
+)
+async def test_failed_login_refreshes_profile_without_replaying_commands(failure):
+    client = Mock()
+    remote = RemoteCharger(client, "TEST")
+
+    async def connect():
+        remote.stage = "cloud_login"
+        raise failure
+
+    remote._connect = connect
+    remote._exchange = AsyncMock()
+    remote.close = AsyncMock()
+    with pytest.raises(ChargerSyncError):
+        await remote.command(180)
+    client.invalidate_remote_credentials.assert_called_once()
+    remote._exchange.assert_not_awaited()
+    remote.close.assert_awaited_once()
+    assert remote.last_error["stage"] == "cloud_login"
+    if isinstance(failure, RemoteError):
+        assert remote.last_error["reason"] == failure.reason
+        assert remote.last_error["result_code"] == failure.result_code

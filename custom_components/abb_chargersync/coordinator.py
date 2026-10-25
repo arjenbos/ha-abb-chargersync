@@ -151,6 +151,8 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
                 await controller.skip_delay()
             elif operation == "set_current":
                 await controller.set_current(**kwargs)
+            elif operation == "set_free_charging":
+                await controller.set_free_charging(**kwargs)
             elif operation == "set_mode":
                 await controller.set_mode(**kwargs)
             elif operation == "ignore_threshold":

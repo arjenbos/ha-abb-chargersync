@@ -1,5 +1,6 @@
 import asyncio
 import time
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -90,7 +91,14 @@ async def test_read_allowlist_never_posts_active_session():
         await client.read(1, "sessions/active")
     client._request.assert_not_called()
     await client.read(1, "sessions", page=0)
-    client._request.assert_awaited_once_with("GET", "api/v2/devices/1/sessions", params={"page": 0})
+    args, kwargs = client._request.await_args
+    assert args == ("GET", "api/v2/devices/1/sessions")
+    params = kwargs["params"]
+    assert params["page"] == 0
+    start = datetime.strptime(params["startTime"], "%Y-%m-%d %H:%M:%S")
+    end = datetime.strptime(params["endTime"], "%Y-%m-%d %H:%M:%S")
+    assert end - start == timedelta(days=365)
+    assert abs((datetime.now() - end).total_seconds()) < 5
 
 
 async def test_malformed_inventory_and_no_password_storage():
@@ -126,3 +134,39 @@ async def test_missing_profile_session_never_falls_back_to_oauth():
     client.user = AsyncMock(return_value={"id": 42, "authen": "profile-login"})
     with pytest.raises(ChargerSyncError, match="missing remote session"):
         await client.remote_credentials()
+
+
+async def test_history_sends_dates_and_preserves_explicit_filters(aiohttp_client, monkeypatch):
+    queries = []
+
+    async def history(request):
+        queries.append(dict(request.query))
+        if not request.query.get("startTime") or not request.query.get("endTime"):
+            return web.Response(status=400)
+        return web.json_response({"data": []})
+
+    app = web.Application()
+    app.router.add_get("/api/v2/devices/1/sessions", history)
+    server = await aiohttp_client(app)
+    monkeypatch.setattr("custom_components.abb_chargersync.api.API_URL", str(server.make_url("/")))
+    client = ChargerSyncClient(
+        server.session, {"access_token": "a", "expires_at": time.time() + 3600}
+    )
+    assert await client.read(1, "sessions", page=0, per_page=20) == {"data": []}
+    await client.read(
+        1,
+        "sessions",
+        page=1,
+        per_page=20,
+        startTime="2020-01-01 00:00:00",
+        endTime="2020-12-31 23:59:59",
+        isCompanyCarSession=0,
+    )
+    assert queries[0]["page"] == "0"
+    assert queries[1] == {
+        "page": "1",
+        "per_page": "20",
+        "startTime": "2020-01-01 00:00:00",
+        "endTime": "2020-12-31 23:59:59",
+        "isCompanyCarSession": "0",
+    }

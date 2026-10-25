@@ -37,7 +37,7 @@ Available per charger, depending on its responses and supported capabilities:
 | Button | Start charging, stop charging, and skip the random charging delay |
 | Number | Charging current limit and Eco mix minimum current, in whole amperes |
 | Select | Default and active-session charging modes: `max_speed`, `eco_mix`, `solar` |
-| Switch | Start/stop charging with session feedback, enable solar charging control, and ignore the Eco mix start/stop threshold |
+| Switch | Free charging without authorization, start/stop charging with session feedback, enable solar charging control, and ignore the Eco mix start/stop threshold |
 | Lock | Lock and unlock the physical charging cable |
 
 The Eco mix minimum current is configurable only when Eco mix is the default mode. Additional thresholds and waiting times are available through actions.
@@ -142,9 +142,21 @@ All actions use the `abb_chargersync` domain and take a `device_id`: the charger
 
 See [action examples and parameters](docs/actions.md). Actions return data through responses rather than large entity attributes. The official cloud performs exports; the integration does not send email itself.
 
+## Free charging
+
+The device's **Free charging** configuration switch enables charging without RFID
+or other authorization, matching the official app's free-vending setting. It does
+not mean electricity is free and is separate from the **Charging enabled** session
+start/stop switch. The integration reads the current device configuration before
+changing this bit and preserves the other configuration bits. The switch appears
+when the charger successfully reports the setting; a failed read makes it
+unavailable rather than assuming a value.
+
+See the [app feature gap analysis](docs/research/app-feature-gaps.md) for remaining differences.
+
 ## Exclusions
 
-- Authorization management: RFID cards, permissions, account registration/deletion, password management, charger binding/unbinding, PIN resets, and free vending. Use the official app.
+- Authorization management: RFID cards, permissions, account registration/deletion, password management, charger binding/unbinding, and PIN resets. Use the official app.
 - Bluetooth transport and device-specific Bluetooth cipher management.
 - Network configuration and firmware installation: the official app requires Bluetooth for these screens.
 - Installer functions found only as generic SDK capabilities, such as OCPP server changes, Modbus/meter configuration, electrical protection, VIN whitelists, I/O, and resets. Cloud support has not been established, and there is no generic raw-command action exposing them.

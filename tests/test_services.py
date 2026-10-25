@@ -1,11 +1,13 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 import probatio
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import ServiceValidationError
 
-from custom_components.abb_chargersync.services import SCHEMAS, execute
+from custom_components.abb_chargersync.api import ChargerSyncError, UnsupportedError
+from custom_components.abb_chargersync.services import SCHEMAS, execute, resolve
 
 
 @pytest.fixture
@@ -112,3 +114,41 @@ async def test_export_uses_documented_wire_fields(coordinator):
             "isCompanyCarSession": True,
         },
     )
+
+
+async def test_load_limits_uses_official_read_mode(coordinator):
+    controller = SimpleNamespace(remote=SimpleNamespace(command=AsyncMock(return_value=b"\0" * 7)))
+    coordinator.controllers[1] = controller
+    result = await execute(coordinator, 1, "get_data", {"resource": "load_limits"})
+    controller.remote.command.assert_awaited_once_with(164, b"\x02")
+    assert result["result"]["enabled"] is False
+    assert result["result"]["ranges"] == []
+
+
+def test_resolve_uses_single_config_entry_owner():
+    # No deprecated config_entries attribute: only the singular owner is available.
+    device = SimpleNamespace(identifiers={("abb_chargersync", "TEST")}, config_entry_id="owner")
+    owner = SimpleNamespace(data={1: {"device": {"deviceNumber": "TEST"}}})
+    other = SimpleNamespace(data={2: {"device": {"deviceNumber": "TEST"}}})
+    hass = Mock()
+    hass.config_entries.async_entries.return_value = [
+        SimpleNamespace(entry_id="other", state=ConfigEntryState.LOADED, runtime_data=other),
+        SimpleNamespace(entry_id="owner", state=ConfigEntryState.LOADED, runtime_data=owner),
+    ]
+    with patch("custom_components.abb_chargersync.services.dr.async_get") as registry:
+        registry.return_value.async_get.return_value = device
+        assert resolve(hass, "ha-device") == (owner, 1)
+        device.config_entry_id = "unloaded"
+        with pytest.raises(ServiceValidationError, match="one loaded account"):
+            resolve(hass, "ha-device")
+
+
+async def test_unavailable_firmware_feed_is_explicit_optional_result(coordinator):
+    coordinator.client.read.side_effect = UnsupportedError("Endpoint unavailable")
+    result = await execute(coordinator, 1, "get_data", {"resource": "firmware"})
+    assert result == {"result": {"available": False}}
+    with pytest.raises(UnsupportedError):
+        await execute(coordinator, 1, "get_data", {"resource": "schedules"})
+    coordinator.client.read.side_effect = ChargerSyncError("Cannot connect to ChargerSync cloud")
+    with pytest.raises(ChargerSyncError):
+        await execute(coordinator, 1, "get_data", {"resource": "firmware"})

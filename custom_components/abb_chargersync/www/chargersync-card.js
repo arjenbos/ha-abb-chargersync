@@ -30,7 +30,9 @@ export class ChargerSyncCard extends HTMLElement {
   constructor() {
     super(); this.attachShadow({mode: "open"}); this.data = {}; this.errors = {};
     this.tab = "schedules"; this.page = 0; this.busy = false; this.loaded = false;
-    this.filters = {}; this.message = "";
+    const end = new Date(), start = new Date(end.getTime() - 365 * 86400000);
+    const localTime = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace("T", " ");
+    this.filters = {start_time: localTime(start), end_time: localTime(end)}; this.message = "";
   }
   setConfig(config) {
     if (!config.entity && !config.device_id) throw new Error("Set entity to this charger's charging-status entity, or set device_id.");
@@ -193,7 +195,10 @@ export class ChargerSyncCard extends HTMLElement {
     } else {
       this.button(this.busy ? "Loading…" : "Refresh", () => this.load(), this.content, true);
       for (const resource of RESOURCES[this.tab]) if (this.errors[resource]) {
-        const error = node("p", `${resource}: ${this.errors[resource]}`); error.className = "error"; error.setAttribute("role", "alert"); this.content.append(error);
+        const description = resource === "sessions"
+          ? `Charging history could not be loaded${this.errors[resource].includes("HTTP 400") ? " because ChargerSync rejected the selected filters (HTTP 400)" : ""}. Check the date range and select Apply filters, or use Refresh to retry.`
+          : `${resource}: ${this.errors[resource]}`;
+        const error = node("p", description); error.className = "error"; error.setAttribute("role", "alert"); this.content.append(error);
       }
       this[`render_${this.tab}`]();
     }
@@ -223,30 +228,36 @@ export class ChargerSyncCard extends HTMLElement {
   }
   render_history() {
     const fields = this.form("Filter sessions", values => {
+      if (values.start_time > values.end_time) throw new Error("Choose an Until date after the From date.");
       this.filters = {};
       if (values.start_time) this.filters.start_time = apiTime(values.start_time);
       if (values.end_time) this.filters.end_time = apiTime(values.end_time);
       if (values.company !== "all") this.filters.company_only = values.company === "company";
       this.page = 0; return this.load();
     }, "Apply filters");
-    this.field(fields, "start_time", "From", "datetime-local", this.filters.start_time?.replace(" ", "T"));
-    this.field(fields, "end_time", "Until", "datetime-local", this.filters.end_time?.replace(" ", "T"));
+    this.field(fields, "start_time", "From", "datetime-local", this.filters.start_time?.replace(" ", "T"), {required: true});
+    this.field(fields, "end_time", "Until", "datetime-local", this.filters.end_time?.replace(" ", "T"), {required: true});
     this.field(fields, "company", "Session type", [["all", "All"], ["company", "Company"], ["private", "Private"]], this.filters.company_only === undefined ? "all" : this.filters.company_only ? "company" : "private");
-    const sessions = rows(this.data.sessions);
-    const stats = node("div"); stats.className = "stats";
-    const totalEnergy = sessions.filter(r => numeric(r.energy)).reduce((sum, r) => sum + Number(r.energy) / 1000, 0);
-    const energy = node("div", "Energy on this page"); energy.append(node("strong", `${totalEnergy.toFixed(2)} kWh`)); stats.append(energy);
-    const currencyGroups = new Map();
-    for (const r of sessions) if (numeric(r.cost) && r.currencyType !== undefined) currencyGroups.set(r.currencyType, (currencyGroups.get(r.currencyType) || 0) + Number(r.cost));
-    for (const [currency, cost] of currencyGroups) { const el = node("div", `Cost on this page · ${this.currency(currency)}`); el.append(node("strong", cost.toFixed(2))); stats.append(el); }
-    this.content.append(stats);
-    this.content.append(node("p", "Page totals cover the returned sessions only. Costs come from ChargerSync; different currencies are kept separate."));
-    this.table([["Started", "startTime"], ["Stopped", "stopTime"], ["Energy (kWh)", r => energyKwh(r.energy)], ["Solar (kWh)", r => energyKwh(r.solarEnergy)], ["Solar share", r => numeric(r.energy) && Number(r.energy) > 0 && numeric(r.solarEnergy) ? `${(100 * Number(r.solarEnergy) / Number(r.energy)).toFixed(1)}%` : "—"], ["Cost", "cost"], ["Currency", r => this.currency(r.currencyType)], ["Duration (s)", "duration"], ["Company", r => Number(r.isCompanyCarSession) === 1 ? "Yes" : "No"], ["Finish reason", "chargeFinishReason"]], sessions, (row, cell) => {
-      if (row.orderId) this.button(Number(row.isCompanyCarSession) === 1 ? "Mark private" : "Mark company", () => this.mutate("set_company_session", {session_id: String(row.orderId), company: Number(row.isCompanyCarSession) !== 1}), cell, true);
-    });
-    const prev = this.button("Previous", () => { this.page--; this.load(); }, this.content, true); prev.disabled = this.busy || this.page === 0;
-    this.content.append(node("span", `Page ${this.page + 1}`));
-    const next = this.button("Next", () => { this.page++; this.load(); }, this.content, true); next.disabled = this.busy || sessions.length < 20;
+    if (this.data.sessions !== undefined && !this.errors.sessions) {
+      const sessions = rows(this.data.sessions);
+      const stats = node("div"); stats.className = "stats";
+      const totalEnergy = sessions.filter(r => numeric(r.energy)).reduce((sum, r) => sum + Number(r.energy) / 1000, 0);
+      const energy = node("div", "Energy on this page"); energy.append(node("strong", `${totalEnergy.toFixed(2)} kWh`)); stats.append(energy);
+      const currencyGroups = new Map();
+      for (const r of sessions) if (numeric(r.cost) && r.currencyType !== undefined) currencyGroups.set(r.currencyType, (currencyGroups.get(r.currencyType) || 0) + Number(r.cost));
+      for (const [currency, cost] of currencyGroups) { const el = node("div", `Cost on this page · ${this.currency(currency)}`); el.append(node("strong", cost.toFixed(2))); stats.append(el); }
+      this.content.append(stats);
+      this.content.append(node("p", "Page totals cover the returned sessions only. Costs come from ChargerSync; different currencies are kept separate."));
+      this.table([["Started", "startTime"], ["Stopped", "stopTime"], ["Energy (kWh)", r => energyKwh(r.energy)], ["Solar (kWh)", r => energyKwh(r.solarEnergy)], ["Solar share", r => numeric(r.energy) && Number(r.energy) > 0 && numeric(r.solarEnergy) ? `${(100 * Number(r.solarEnergy) / Number(r.energy)).toFixed(1)}%` : "—"], ["Cost", "cost"], ["Currency", r => this.currency(r.currencyType)], ["Duration (s)", "duration"], ["Company", r => Number(r.isCompanyCarSession) === 1 ? "Yes" : "No"], ["Finish reason", "chargeFinishReason"]], sessions, (row, cell) => {
+        if (row.orderId) this.button(Number(row.isCompanyCarSession) === 1 ? "Mark private" : "Mark company", () => this.mutate("set_company_session", {session_id: String(row.orderId), company: Number(row.isCompanyCarSession) !== 1}), cell, true);
+      });
+      const prev = this.button("Previous", () => { this.page--; this.load(); }, this.content, true); prev.disabled = this.busy || this.page === 0;
+      this.content.append(node("span", `Page ${this.page + 1}`));
+      const next = this.button("Next", () => { this.page++; this.load(); }, this.content, true); next.disabled = this.busy || sessions.length < 20;
+    } else {
+      const unavailable = node("p", this.busy ? "Loading charging history…" : "History and page totals are unavailable until charging sessions can be loaded.");
+      unavailable.setAttribute("role", "status"); this.content.append(unavailable);
+    }
     const tf = this.form("Cloud statistics", values => this.loadTrends(values), "Load statistics");
     this.field(tf, "start_time", "From", "date", this.filters.start_time?.slice(0,10), {required: true});
     this.field(tf, "end_time", "Until", "date", this.filters.end_time?.slice(0,10), {required: true});
@@ -364,7 +375,11 @@ export class ChargerSyncCard extends HTMLElement {
       ]);
       this.details("Capability and connection diagnostics", d);
     }
-    this.details("Available firmware packages (installation requires the official app)", this.data.firmware);
+    if (this.data.firmware?.available === false) {
+      this.content.append(node("p", "Firmware package information is unavailable for this charger. Check for updates in the official ChargerSync app."));
+    } else {
+      this.details("Available firmware packages (installation requires the official app)", this.data.firmware);
+    }
     const fields = this.form("Read charger logs", values => this.loadLogs(values), "Read logs");
     this.field(fields, "log_from", "Starting serial number", "number", this.logFrom ?? 0, {min:0, step:1, required:true});
     this.field(fields, "limit", "Records (maximum 50)", "number", 50, {min:1, max:50, step:1, required:true});

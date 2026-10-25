@@ -41,6 +41,7 @@ class ChargerController:
         self.read_failures = {}
         for key, kind in (
             ("power", None),
+            ("free_charging", None),
             ("active_mode", 9),
             ("default_mode", 10),
             ("eco_threshold", 38),
@@ -48,7 +49,9 @@ class ChargerController:
         ):
             data = None
             try:
-                if kind is None:
+                if key == "free_charging":
+                    data = await self.optional(key, lambda: self.remote.command(221))
+                elif kind is None:
                     data = await self.optional(key, lambda: self.remote.command(224))
                 else:
                     data = await self.optional(
@@ -71,6 +74,10 @@ class ChargerController:
 
     @staticmethod
     def _parse_setting(key: str, data: bytes) -> dict:
+        if key == "free_charging":
+            if not data:
+                raise ProtocolError("Missing device configuration")
+            return {"free_charging": bool(data[0] & 0x04)}
         if key == "power":
             if not 3 <= len(data) <= 6:
                 raise ProtocolError("Invalid current limit response")
@@ -117,6 +124,17 @@ class ChargerController:
                 raise ProtocolError("Current outside device limits")
             await self.simple(192, bytes((power[0], current)))
 
+    async def set_free_charging(self, enabled: bool) -> None:
+        """Change only the authorization bit, matching the official app's read-modify-write."""
+        async with self._write_lock:
+            config = await self.remote.command(221)
+            self._parse_setting("free_charging", config)
+            value = config[0] | 0x04 if enabled else config[0] & ~0x04
+            # The SDK sends the updated configuration byte followed by reserved zero.
+            result = await self.remote.command(220, bytes((value, 0)))
+            if not result or result[0] != 0:
+                raise ProtocolError("Free charging configuration rejected")
+
     async def set_mode(
         self,
         mode: str,
@@ -148,13 +166,13 @@ class ChargerController:
 
     async def skip_delay(self) -> None:
         async with self._write_lock:
-            settings = parse_limits(await self.remote.command(164, b"\0"))
+            settings = parse_limits(await self.remote.command(164, b"\x02"))
             settings["random_valid"] = 1
             await self.simple(164, encode_limits(3, settings))
 
     async def replace_limits(self, ranges: list[dict], enabled: bool) -> None:
         async with self._write_lock:
-            settings = parse_limits(await self.remote.command(164, b"\0"))
+            settings = parse_limits(await self.remote.command(164, b"\x02"))
             power = await self.remote.command(224)
             self._parse_setting("power", power)
             for r in ranges:

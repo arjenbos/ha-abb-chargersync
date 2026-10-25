@@ -376,6 +376,29 @@ views:
   - type: grid
     cards:
     - type: heading
+      heading: Charging authorization
+      icon: mdi:shield-key
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: switch.charger_free_charging
+        state:
+        - 'on'
+        - 'off'
+      card:
+        type: tile
+        entity: switch.charger_free_charging
+        name: Free charging (no authorization)
+        icon: mdi:shield-key-outline
+        tap_action:
+          action: more-info
+        icon_tap_action:
+          action: more-info
+        features:
+        - type: toggle
+  - type: grid
+    cards:
+    - type: heading
       heading: Solar charging
       icon: mdi:solar-power-variant
     - type: conditional

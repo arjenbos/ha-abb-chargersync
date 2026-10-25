@@ -34,6 +34,7 @@ SETTINGS = {
     "solar_min_current": 2,
     "ignore_eco_threshold": False,
     "cable_locked": True,
+    "free_charging": True,
 }
 
 
@@ -76,6 +77,15 @@ async def test_full_setup_entities_services_dynamic_devices_and_unload(hass):
         assert hass.states.get("switch.driveway_charging_enabled").state == "on"
         assert hass.states.get("sensor.driveway_session_energy").state == "1.2"
         assert hass.states.get("lock.driveway_charging_cable").state == "locked"
+        assert hass.states.get("switch.driveway_free_charging").state == "on"
+        with patch(
+            "custom_components.abb_chargersync.controller.ChargerController.set_free_charging",
+            new_callable=AsyncMock,
+        ) as free_charging:
+            await hass.services.async_call(
+                "switch", "turn_off", {"entity_id": "switch.driveway_free_charging"}, blocking=True
+            )
+            free_charging.assert_awaited_once_with(enabled=False)
         assert hass.states.get("number.driveway_charging_current_limit").state == "16"
         assert hass.states.get("select.driveway_default_charging_mode").state == "eco_mix"
         assert hass.services.has_service(DOMAIN, "get_data")

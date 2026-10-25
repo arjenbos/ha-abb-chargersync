@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -157,6 +158,15 @@ class ChargerSyncClient:
             "latest-upgrade-packages",
         }:
             raise ValueError("Resource not allowed")
+        if resource == "sessions":
+            # DashboardViewModel supplies a date range even for the first page.
+            # Keep this here so background reads and ownership checks use it too.
+            now = datetime.now().astimezone()
+            params = {
+                "startTime": (now - timedelta(days=365)).strftime("%Y-%m-%d %H:%M:%S"),
+                "endTime": now.strftime("%Y-%m-%d %H:%M:%S"),
+                **params,
+            }
         return await self._request("GET", f"api/v2/devices/{device_id}/{resource}", params=params)
 
     async def currencies(self) -> Any:

@@ -23,6 +23,15 @@ from .protocol import (
 )
 
 
+class RemoteError(ChargerSyncError):
+    """Remote failure with safe, structured evidence, excluding vendor payloads."""
+
+    def __init__(self, reason: str, result_code: int | None = None) -> None:
+        super().__init__(reason.replace("_", " "))
+        self.reason = reason
+        self.result_code = result_code
+
+
 class RemoteCharger:
     def __init__(
         self,
@@ -66,7 +75,7 @@ class RemoteCharger:
         assert self._ws is not None
         message = await self._ws.receive()
         if message.type != aiohttp.WSMsgType.TEXT:
-            raise ChargerSyncError("Remote connection closed")
+            raise RemoteError("connection_closed", self._ws.close_code)
         try:
             data = message.json()
         except ValueError as err:
@@ -94,8 +103,7 @@ class RemoteCharger:
             if response.get("method") == "login":
                 code = self._reply_code(response)
                 if code != 0:
-                    self.client.invalidate_remote_credentials()
-                    raise ChargerSyncError("Remote login rejected")
+                    raise RemoteError("login_rejected", code)
                 break
         self.stage = "device_authentication"
         body = await self._exchange(254, identity_body(self.number))
@@ -134,16 +142,16 @@ class RemoteCharger:
             if method == "update_device_status":
                 data = response.get("data", {})
                 if data.get("status") in (1, 3, -1):
-                    raise ChargerSyncError("Device disconnected")
+                    raise RemoteError("device_disconnected", data["status"])
                 continue
             if method != "remote_control":
                 continue
             code = self._reply_code(response)
             if code == 401:
                 self.client.invalidate_remote_credentials()
-                raise ChargerSyncError("Remote account session expired")
+                raise RemoteError("account_session_expired", code)
             if code != 0:
-                raise ChargerSyncError("Remote command rejected")
+                raise RemoteError("command_rejected", code)
             data = response.get("data")
             if not isinstance(data, dict) or data.get("deviceNumber") != self.number:
                 continue
@@ -161,6 +169,17 @@ class RemoteCharger:
                     continue
                 return reply
 
+    def _record_failure(self, err: Exception) -> None:
+        self.last_error = {"stage": self.stage, "error": type(err).__name__}
+        if isinstance(err, RemoteError):
+            self.last_error["reason"] = err.reason
+            if err.result_code is not None:
+                self.last_error["result_code"] = err.result_code
+        if self.stage == "cloud_login":
+            # A closed login handshake can also indicate a stale profile session.
+            # Refresh on the next poll without replaying the requested command.
+            self.client.invalidate_remote_credentials()
+
     async def command(self, command: int, body: bytes = b"", subtype: int | None = None) -> bytes:
         async with self._lock:
             try:
@@ -172,7 +191,7 @@ class RemoteCharger:
                     self.last_error = None
                     return result
             except (aiohttp.ClientError, TimeoutError, ConnectionError, RuntimeError) as err:
-                self.last_error = {"stage": self.stage, "error": type(err).__name__}
+                self._record_failure(err)
                 if isinstance(err, aiohttp.WSServerHandshakeError):
                     self.last_error["http_status"] = err.status
                 await self.close()
@@ -183,7 +202,7 @@ class RemoteCharger:
                 await self.close()
                 raise
             except Exception as err:
-                self.last_error = {"stage": self.stage, "error": type(err).__name__}
+                self._record_failure(err)
                 await self.close()
                 raise
 

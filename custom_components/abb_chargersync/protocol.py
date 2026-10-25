@@ -218,7 +218,10 @@ def parse_solar_status(body: bytes) -> dict:
 
 def parse_limits(body: bytes) -> dict:
     if len(body) < 7 or body[0]:
-        raise ProtocolError("Invalid load-balancing response")
+        raise ProtocolError(
+            f"Invalid load-balancing response (length={len(body)}, "
+            f"result={body[0] if body else 'missing'})"
+        )
     _, valid, enabled, mode, delay, ranges_enabled = struct.unpack_from("<BBBBHB", body)
     ranges = []
     if ranges_enabled:

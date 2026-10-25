@@ -11,7 +11,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
-from .api import AuthenticationError, ChargerSyncError
+from .api import AuthenticationError, ChargerSyncError, UnsupportedError
 from .const import DOMAIN
 from .protocol import SOLAR_OFFSETS, ProtocolError, parse_limits, parse_solar_offsets
 
@@ -160,7 +160,7 @@ def resolve(hass: HomeAssistant, device_id: str):
     numbers = {identifier for domain, identifier in device.identifiers if domain == DOMAIN}
     matches = []
     for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.state != ConfigEntryState.LOADED or entry.entry_id not in device.config_entries:
+        if entry.state != ConfigEntryState.LOADED or entry.entry_id != device.config_entry_id:
             continue
         for charger_id, snapshot in entry.runtime_data.data.items():
             if snapshot["device"]["deviceNumber"] in numbers:
@@ -190,7 +190,7 @@ async def execute(c, charger_id: int, service: str, data: dict):
                 "remote_failure": {
                     k: v
                     for k, v in snapshot.get("remote_failure", {}).items()
-                    if k in {"stage", "error", "http_status"}
+                    if k in {"stage", "error", "http_status", "reason", "result_code"}
                 },
             }
         elif resource == "solar_offsets":
@@ -200,7 +200,7 @@ async def execute(c, charger_id: int, service: str, data: dict):
         elif resource == "currencies":
             result = await client.currencies()
         elif resource == "load_limits":
-            result = parse_limits(await c.controllers[charger_id].remote.command(164, b"\0"))
+            result = parse_limits(await c.controllers[charger_id].remote.command(164, b"\x02"))
         elif resource in ("log_info", "logs"):
             remote = c.controllers[charger_id].remote
             raw = await remote.command(
@@ -241,7 +241,13 @@ async def execute(c, charger_id: int, service: str, data: dict):
                 "auto_export": "sessions/auto-export",
                 "firmware": "latest-upgrade-packages",
             }.get(resource, resource)
-            result = await client.read(charger_id, path, **params)
+            try:
+                result = await client.read(charger_id, path, **params)
+            except UnsupportedError:
+                if resource != "firmware":
+                    raise
+                # An unavailable package feed does not establish that firmware is current.
+                result = {"available": False}
         return {"result": result}
     if service == "set_solar_offsets":
         await c.action(charger_id, "set_solar_offsets", settings=data["settings"])

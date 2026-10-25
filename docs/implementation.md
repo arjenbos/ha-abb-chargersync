@@ -39,3 +39,55 @@ Measurement scaling follows the SDK parsers: legacy session energy /100 kWh, sol
 - User passwords are not stored; refresh tokens are included in Home Assistant storage and backups. Standard Home Assistant access protection remains relevant.
 
 The original APK analysis is under `docs/research`. That inventory covers more capabilities than the explicitly limited scope of this integration.
+
+
+## Session history date range
+
+The local ChargerSync 3.5.0 APK provides two relevant sources:
+`repositories/SessionRepository.java` starts history pagination at page zero, and
+`ui/main/dashboard/DashboardViewModel.java` supplies a date range from one year
+ago to the current time. `constants/TimeFormats.java` defines `DATE_TIME_API` as
+`yyyy-MM-dd HH:mm:ss`. These paths are relative to
+`com/abbemobility/chargersync/` in the decompiled sources.
+
+The REST client supplies missing session date bounds using the last 365 days
+through the current time, including background reads and session ownership
+checks. Explicit bounds remain unchanged so older history can be requested.
+The management card shows its range, rejects reversed dates locally, and hides
+page totals and pagination on failed history reads. Successful empty responses
+still show an empty page.
+
+Live Home Assistant service checks on October 25, 2026 confirmed that empty
+bounds returned HTTP 400, while explicit bounds and the integration defaults
+each returned seven sessions. This verifies the date-range behavior for the
+tested account; it does not establish all possible cloud validation rules.
+
+
+## Reading load-balancing plans
+
+Command 164 (`SCHEDULED_LIMIT`) reads settings with the single-byte body `02`.
+The APK's `AbbBluetoothClient.readLoadBalancingPlans` uses the default mode 2
+from `scheduledLimit$default`; `RequestBodyFactory.scheduledLimitRequestBody`
+emits only that mode byte for a read. Mode 0 is not the query operation.
+Both direct reads and reads before modifying timed limits or skipping a delay
+use mode 2. The reply parser still rejects incomplete settings so writes cannot
+silently replace unknown configuration with defaults.
+
+Two live reads on October 25, 2026 succeeded after correcting the mode, reporting
+timed limits enabled with zero configured ranges. No charger settings were
+changed during these checks. Service ownership uses the Home Assistant device's
+singular `config_entry_id`, avoiding the deprecated `config_entries` property.
+
+
+## Remote login diagnostics and recovery
+
+Remote failures record a fixed reason and numeric result code, excluding cloud
+payloads and credentials. A failed WebSocket login handshake invalidates cached
+profile credentials, including when the connection closes or times out before
+a login reply. The next poll fetches the profile again; commands are not replayed.
+
+Live polling on October 25, 2026 captured `cloud_login`, `login_rejected`, result
+code 1. This identifies a server login rejection but does not establish why the
+server rejects it. The active-mode configuration query separately returns result
+code 1; its query type 9 matches the APK. Neither code is treated as proof that
+the feature is unsupported, and neither warning is suppressed.

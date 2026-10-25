@@ -1,4 +1,4 @@
-"""Session and solar controls, excluding free-vending settings."""
+"""Session, authorization, and solar controls."""
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
@@ -15,6 +15,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             c, i, "charging_enabled", "Charging enabled", required="status_code"
         )
         for key, name in (
+            ("free_charging", "Free charging"),
             ("solar_enabled", "Solar charging enabled"),
             ("ignore_eco_threshold", "Ignore Eco mix start-stop threshold"),
         ):
@@ -32,7 +33,9 @@ class ChargerSyncSwitch(ChargerSyncEntity, SwitchEntity):
         return self.state_data.get(self.key)
 
     async def _set(self, enabled):
-        if self.key == "ignore_eco_threshold":
+        if self.key == "free_charging":
+            await self.run("set_free_charging", enabled=enabled)
+        elif self.key == "ignore_eco_threshold":
             await self.run("ignore_threshold", enabled=enabled)
         else:
             await self.run("set_mode", mode=self.state_data["default_mode"], enabled=enabled)

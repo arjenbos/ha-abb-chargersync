@@ -63,6 +63,7 @@ async def test_every_dashboard_entity_matches_the_integration(hass):
         "solar_min_current": 2,
         "ignore_eco_threshold": False,
         "cable_locked": True,
+        "free_charging": True,
     }
     with (
         patch(

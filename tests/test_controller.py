@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 
@@ -87,3 +87,56 @@ async def test_settings_failure_does_not_hide_other_capabilities():
     assert result["default_mode"] == "max_speed"
     assert result["cable_locked"] is False
     assert c.read_failures == {"eco_threshold": {"error": "ProtocolError", "response_length": 2}}
+
+
+async def test_load_limit_writes_read_mode_two_and_preserve_random_delay():
+    remote = AsyncMock()
+    # Result, random-valid/enabled/mode, delay=600, ranges disabled.
+    original = b"\0\1\1\2\x58\2\0"
+    remote.command.side_effect = [original, b"\0"]
+    controller = ChargerController(remote)
+    await controller.skip_delay()
+    assert remote.command.await_args_list == [
+        call(164, b"\x02"),
+        call(164, b"\3" + original[1:] + b"\0"),
+    ]
+    remote.command.reset_mock()
+    remote.command.side_effect = [original, b"\0\x20\x10", b"\0"]
+    await controller.replace_limits([], False)
+    assert remote.command.await_args_list == [
+        call(164, b"\x02"),
+        call(224),
+        call(164, b"\5" + original[1:] + b"\0"),
+    ]
+
+
+@pytest.mark.parametrize("enabled,original,expected", [(True, 0xA1, 0xA5), (False, 0xA5, 0xA1)])
+async def test_free_charging_preserves_other_configuration_bits(enabled, original, expected):
+    remote = AsyncMock()
+    remote.command.side_effect = [bytes((original, 0xFF)), b"\0"]
+    await ChargerController(remote).set_free_charging(enabled)
+    assert remote.command.await_args_list == [call(221), call(220, bytes((expected, 0)))]
+
+
+@pytest.mark.parametrize("reply", [b"", b"\1"])
+async def test_free_charging_rejects_missing_or_failed_acknowledgement(reply):
+    remote = AsyncMock()
+    remote.command.side_effect = [b"\0", reply]
+    with pytest.raises(ProtocolError, match="rejected"):
+        await ChargerController(remote).set_free_charging(True)
+    assert remote.command.await_count == 2
+
+
+async def test_free_charging_missing_configuration_never_writes():
+    remote = AsyncMock()
+    remote.command.return_value = b""
+    with pytest.raises(ProtocolError, match="Missing device configuration"):
+        await ChargerController(remote).set_free_charging(True)
+    remote.command.assert_awaited_once_with(221)
+
+
+def test_free_charging_read_uses_bit_two_without_result_prefix():
+    assert ChargerController._parse_setting("free_charging", b"\xa5") == {"free_charging": True}
+    assert ChargerController._parse_setting("free_charging", b"\xa1\xff") == {
+        "free_charging": False
+    }
