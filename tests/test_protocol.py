@@ -168,3 +168,24 @@ def test_status_accepts_firmware_extension_after_known_fields():
     assert parse_solar_status(body + b"\0") == parse_solar_status(body)
     with pytest.raises(ProtocolError):
         parse_solar_status(body[:-1])
+
+
+def test_volume_parsing_and_body():
+    from custom_components.abb_chargersync.protocol import (
+        DeviceRejectedError,
+        parse_volume,
+        volume_body,
+    )
+
+    body = bytearray(70)
+    body[61] = 35
+    assert parse_volume(bytes(body)) == 35
+    assert parse_volume(bytes(61)) is None
+    body[61] = 200
+    assert parse_volume(bytes(body)) is None
+    assert volume_body(0) == b"\0\1"
+    with pytest.raises(ValueError):
+        volume_body(101)
+    with pytest.raises(DeviceRejectedError) as err:
+        check_reply(Frame(181, 3, b""))
+    assert err.value.result_code == 3 and isinstance(err.value, ProtocolError)

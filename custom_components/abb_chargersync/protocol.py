@@ -20,6 +20,14 @@ class ProtocolError(ChargerSyncError):
     """Malformed, rejected or incomplete device response."""
 
 
+class DeviceRejectedError(ProtocolError):
+    """A complete, well-formed reply carried a non-zero device result code."""
+
+    def __init__(self, result_code: int) -> None:
+        super().__init__(f"Device rejected command ({result_code})")
+        self.result_code = result_code
+
+
 class ConfigurationUnavailableError(ChargerSyncError):
     """A configuration read was rejected for now, not proof of missing capability."""
 
@@ -81,8 +89,28 @@ def check_reply(frame: Frame) -> bytes:
     if frame.code in (20, 21):
         raise UnsupportedError("Device does not support command")
     if frame.code:
-        raise ProtocolError(f"Device rejected command ({frame.code})")
+        raise DeviceRejectedError(frame.code)
     return frame.body
+
+
+# READ_SYS_INFO_CMD (177) reply: QuerySysInfoResponse reads the volume ("voice") from
+# body byte 61, after the device number, plug type, versions, model and charge mode.
+SYS_INFO_VOLUME_OFFSET = 61
+
+
+def parse_volume(body: bytes) -> int | None:
+    """Return the 0..100 volume from a system-information reply, if the charger reports it."""
+    if len(body) <= SYS_INFO_VOLUME_OFFSET:
+        return None
+    volume = body[SYS_INFO_VOLUME_OFFSET]
+    return volume if volume <= 100 else None
+
+
+def volume_body(volume: int) -> bytes:
+    """SET_VOICE_CMD (178) body from RequestBodyFactory: volume byte, then constant 1."""
+    if not 0 <= volume <= 100:
+        raise ValueError("Volume outside 0..100")
+    return bytes((volume, 1))
 
 
 def identity_body(device_number: str, user_id: int = 0) -> bytes:

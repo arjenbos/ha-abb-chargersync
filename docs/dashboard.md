@@ -121,7 +121,7 @@ If you explicitly manage resources in YAML mode, add this entry under your exist
 `lovelace.resources` list to ensure the same ordered loading:
 
 ```yaml
-- url: /abb_chargersync/chargersync-card.js?v=0.2.2
+- url: /abb_chargersync/chargersync-card.js?v=1.0.0
   type: module
 ```
 

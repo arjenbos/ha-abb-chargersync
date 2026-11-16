@@ -8,7 +8,15 @@ from collections.abc import Awaitable, Callable
 
 from .api import AuthenticationError, ChargerSyncError, UnsupportedError
 from .const import MODES
-from .protocol import ProtocolError, encode_limits, parse_limits, parse_solar_status, parse_status
+from .protocol import (
+    ProtocolError,
+    encode_limits,
+    parse_limits,
+    parse_solar_status,
+    parse_status,
+    parse_volume,
+    volume_body,
+)
 from .websocket import RemoteCharger
 
 
@@ -46,11 +54,14 @@ class ChargerController:
             ("default_mode", 10),
             ("eco_threshold", 38),
             ("cable", 3),
+            ("volume", None),
         ):
             data = None
             try:
                 if key == "free_charging":
                     data = await self.optional(key, lambda: self.remote.command(221))
+                elif key == "volume":
+                    data = await self.optional(key, lambda: self.remote.command(177))
                 elif kind is None:
                     data = await self.optional(key, lambda: self.remote.command(224))
                 else:
@@ -105,11 +116,14 @@ class ChargerController:
             return {"ignore_eco_threshold": bool(data[0])}
         if key == "cable" and len(data) == 1 and data[0] in (1, 2):
             return {"cable_locked": data[0] == 1}
+        if key == "volume":
+            volume = parse_volume(data)
+            return {} if volume is None else {"volume": volume}
         return {}
 
     async def simple(self, command: int, body: bytes = b"") -> None:
         result = await self.remote.command(command, body)
-        if command in (180, 192, 209, 231, 164) and (not result or result[0]):
+        if command in (180, 192, 209, 231, 164, 178) and (not result or result[0]):
             raise ProtocolError("Device action rejected")
         if command == 182 and len(result) < 4:
             raise ProtocolError("Truncated stop acknowledgement")
@@ -123,6 +137,11 @@ class ChargerController:
             if not 6 <= current <= parsed["maximum_current"]:
                 raise ProtocolError("Current outside device limits")
             await self.simple(192, bytes((power[0], current)))
+
+    async def set_volume(self, volume: int) -> None:
+        """SET_VOICE_CMD; the official app never sends it, so treat it as experimental."""
+        async with self._write_lock:
+            await self.simple(178, volume_body(volume))
 
     async def set_free_charging(self, enabled: bool) -> None:
         """Change only the authorization bit, matching the official app's read-modify-write."""

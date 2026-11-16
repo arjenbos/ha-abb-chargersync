@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 from .api import AuthenticationError, ChargerSyncClient, ChargerSyncError, UnsupportedError
 from .const import DEFAULT_INTERVAL, DOMAIN
 from .controller import ChargerController
+from .protocol import ProtocolError
 from .websocket import RemoteCharger
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,9 +91,11 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
                         lambda: int(dt_util.now().utcoffset().total_seconds() / 3600),
                     )
                 )
+            result["connection"] = controller.remote.connection_stats()
             # Zero is explicitly offline; missing online status still permits a cloud attempt.
-            if device.get("online") == 0:
-                await controller.remote.close()
+            # The REST flag refreshes every five minutes, so a live WebSocket is kept open:
+            # closing it would force another charger login once the flag recovers.
+            if device.get("online") == 0 and not controller.remote.connected:
                 return result
             read_stage = "status_decode"
             try:
@@ -114,11 +117,12 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
                 result["remote_failure"] = controller.remote.last_error or {
                     "stage": read_stage,
                     "error": type(err).__name__,
-                    "detail": str(err) if type(err).__name__ == "ProtocolError" else "",
+                    "detail": str(err) if isinstance(err, ProtocolError) else "",
                 }
                 previous = (self.data or {}).get(device_id, {}).get("remote_failure")
                 if previous != result["remote_failure"]:
                     _LOGGER.warning("Charger remote read failed: %s", result["remote_failure"])
+            result["connection"] = controller.remote.connection_stats()
             return result
 
     async def _async_update_data(self) -> dict[int, dict]:
@@ -137,6 +141,8 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
         if device_id not in self.controllers:
             raise HomeAssistantError("Charger is no longer linked to this account")
         controller = self.controllers[device_id]
+        # A deliberate user action may reconnect at once, even during the backoff.
+        controller.remote.allow_reconnect()
         try:
             if operation == "start":
                 await controller.simple(180, b"\0\0")
@@ -151,6 +157,8 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
                 await controller.skip_delay()
             elif operation == "set_current":
                 await controller.set_current(**kwargs)
+            elif operation == "set_volume":
+                await controller.set_volume(**kwargs)
             elif operation == "set_free_charging":
                 await controller.set_free_charging(**kwargs)
             elif operation == "set_mode":

@@ -1,7 +1,7 @@
-"""Current limit and Eco mix minimum current."""
+"""Current limit, Eco mix minimum current and charger sound volume."""
 
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.const import EntityCategory, UnitOfElectricCurrent
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfElectricCurrent
 
 from .entity import ChargerSyncEntity, discover
 
@@ -19,6 +19,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             yield ChargerSyncNumber(
                 c, i, "solar_min_current", "Eco mix minimum current", required="solar_min_current"
             )
+        if "volume" in state:
+            yield ChargerSyncVolume(c, i, "volume", "Volume", required="volume")
 
     discover(entry, async_add_entities, factory)
 
@@ -56,3 +58,22 @@ class ChargerSyncNumber(ChargerSyncEntity, NumberEntity):
             await self.run("set_current", current=int(value))
         else:
             await self.run("set_mode", mode="eco_mix", minimum=int(value))
+
+
+class ChargerSyncVolume(ChargerSyncEntity, NumberEntity):
+    """SDK SET_VOICE_CMD volume. Experimental: the official app does not expose it."""
+
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_mode = NumberMode.SLIDER
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:volume-high"
+
+    @property
+    def native_value(self):
+        return self.state_data.get("volume")
+
+    async def async_set_native_value(self, value):
+        await self.run("set_volume", volume=int(value))

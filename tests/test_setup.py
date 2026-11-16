@@ -1,5 +1,5 @@
 from copy import deepcopy
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import device_registry as dr
@@ -35,6 +35,7 @@ SETTINGS = {
     "ignore_eco_threshold": False,
     "cable_locked": True,
     "free_charging": True,
+    "volume": 40,
 }
 
 
@@ -87,6 +88,20 @@ async def test_full_setup_entities_services_dynamic_devices_and_unload(hass):
             )
             free_charging.assert_awaited_once_with(enabled=False)
         assert hass.states.get("number.driveway_charging_current_limit").state == "16"
+        assert hass.states.get("number.driveway_volume").state == "40"
+        with patch(
+            "custom_components.abb_chargersync.controller.ChargerController.set_volume",
+            new_callable=AsyncMock,
+        ) as set_volume:
+            await hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": "number.driveway_volume", "value": 0},
+                blocking=True,
+            )
+            set_volume.assert_awaited_once_with(volume=0)
+        logins = hass.states.get("sensor.driveway_remote_logins")
+        assert logins.state == "0" and logins.attributes["connected"] is False
         assert hass.states.get("select.driveway_default_charging_mode").state == "eco_mix"
         assert hass.services.has_service(DOMAIN, "get_data")
         registry = dr.async_get(hass)
@@ -215,6 +230,7 @@ async def test_cable_write_rejected_while_charging(hass):
     entry.add_to_hass(hass)
     c = ChargerSyncCoordinator(hass, entry, AsyncMock())
     controller = AsyncMock()
+    controller.remote = Mock()
     controller.status.return_value = {"status_code": 6}
     c.controllers[1] = controller
     import pytest

@@ -140,3 +140,32 @@ def test_free_charging_read_uses_bit_two_without_result_prefix():
     assert ChargerController._parse_setting("free_charging", b"\xa1\xff") == {
         "free_charging": False
     }
+
+
+async def test_volume_write_and_rejection():
+    remote = AsyncMock()
+    remote.command.return_value = b"\0"
+    controller = ChargerController(remote)
+    await controller.set_volume(20)
+    remote.command.assert_awaited_once_with(178, b"\x14\x01")
+    remote.command.return_value = b"\1"
+    with pytest.raises(ProtocolError, match="rejected"):
+        await controller.set_volume(20)
+    with pytest.raises(ValueError):
+        await controller.set_volume(150)
+
+
+async def test_settings_read_volume_from_system_information():
+    info = bytearray(70)
+    info[61] = 60
+
+    async def command(cmd, body=b""):
+        if cmd == 177:
+            return bytes(info)
+        raise UnsupportedError
+
+    remote = AsyncMock()
+    remote.command.side_effect = command
+    remote.query_configuration.side_effect = UnsupportedError
+    result = await ChargerController(remote).settings()
+    assert result == {"volume": 60}

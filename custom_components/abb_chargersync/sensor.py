@@ -90,6 +90,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             if key == "status" or key in snapshot.get("state", {}):
                 yield ChargerSyncSensor(c, i, key)
         yield FirmwareSensor(c, i, "firmware", "Firmware", remote=False)
+        yield RemoteLoginSensor(c, i, "remote_logins", "Remote logins", remote=False)
         if "latest-upgrade-packages" in snapshot.get("resources", {}):
             yield FirmwareAvailableSensor(
                 c, i, "available_firmware", "Available firmware", remote=False
@@ -173,6 +174,36 @@ class ChargingEnergySensor(ChargerSyncEntity, RestoreSensor):
         return EnergyStoredData(
             self.native_value, self.native_unit_of_measurement, self.counter.as_dict()
         )
+
+
+class RemoteLoginSensor(ChargerSyncEntity, SensorEntity):
+    """Cloud logins since Home Assistant started; each one can make the charger beep."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:login"
+
+    @property
+    def available(self):
+        return super().available and "connection" in self.snapshot
+
+    @property
+    def native_value(self):
+        return self.snapshot.get("connection", {}).get("connects")
+
+    @property
+    def extra_state_attributes(self):
+        stats = self.snapshot.get("connection", {})
+        return {
+            key: stats.get(key)
+            for key in (
+                "connected",
+                "consecutive_failures",
+                "last_disconnect",
+                "connection_age",
+                "reconnect_in",
+            )
+        }
 
 
 class FirmwareSensor(ChargerSyncEntity, SensorEntity):

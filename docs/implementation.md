@@ -4,7 +4,7 @@
 
 - `api.py`: aiohttp REST client, password grant during configuration, serialized token refresh, and a token persistence callback. No account, RFID, or binding management.
 - `protocol.py`: framing, XOR checksum, bounded incremental decoder, cloud identity authentication, and status/configuration parsers.
-- `websocket.py`: WSS envelopes, one serialized command stream per device, JSON pings, and connection cleanup on errors. No Bluetooth transport.
+- `websocket.py`: one persistent WSS connection per device with a background reader, a serialized command stream, JSON pings, reconnect backoff, and cleanup when the stream becomes ambiguous. No Bluetooth transport.
 - `controller.py`: typed device operations, current-limit validation, and read-modify-write operations for solar and timed-limit settings.
 - `coordinator.py`: cloud inventory, per-device remote connections, refreshing, availability, and discovery.
 - Platform modules: Home Assistant entities created when a capability is successfully read.
@@ -26,6 +26,38 @@ The URL uses `/ws/login`. `CDBleClient.init` normalizes the trailing slash befor
 `getActiveSessions` and `startSession` share the same POST path in the APK. The integration never uses this path to read status. Start and stop operations use explicit device commands.
 
 Measurement scaling follows the SDK parsers: legacy session energy /100 kWh, solar session energy /1000 kWh, and current/voltage /100. Cable status is 1=locked and 2=unlocked. Solar/Eco mix/Max speed use protocol values 3/2/1. This decoding has been tested with synthetic frames.
+
+## Connection lifetime
+
+Every connection repeats the sequence from `CDBleClient` and `WebSocketClientImpl`: cloud
+login (`/ws/login?t=<sessionId>&v=1&e=<authen>`), identity authentication (command 254)
+and time synchronization (command 176). The SDK treats a failed time synchronization as
+a failed connection, and resets the device token to zeros on every disconnect, so neither
+step can be skipped or reused. Chargers can audibly signal this login. The integration
+therefore keeps the connection open:
+
+- The OAuth access token is not part of the WebSocket session. Refreshing it does not reconnect.
+- A complete reply with a non-zero frame result code, frame codes 20/21, or a non-zero,
+  non-401 cloud `remote_control` code rejects only that command. Timeouts, transport errors,
+  invalid frames or envelopes, closes, cloud code 401, and `update_device_status` 1/3/-1
+  end the connection. The last three also end it in the app.
+- A background task reads all messages, as the app's listener does. The app sends a JSON
+  `ping` every 30 seconds while the socket is open and has no idle timeout. The integration
+  does the same.
+- After one immediate retry, which the app also performs, reconnects back off from 30 seconds
+  to 10 minutes. A connection that lasted 5 minutes resets the backoff. User actions bypass it.
+- The REST `online` flag only prevents opening a new connection; it does not close a live one.
+
+The **Remote logins** sensor and diagnostics report the connect count, open state, last
+disconnect reason, connection age and reconnect delay, without identifiers or payloads.
+
+## Sound volume
+
+`CDBleClient.setVoice` sends `SET_VOICE_CMD` (178) with the body `[volume, 1]`, where volume
+is 0–100. The reply's first byte is the result code. `QuerySysInfoResponse` reads the current
+volume from body byte 61 of the `READ_SYS_INFO_CMD` (177) reply. The ABB app never calls
+`setVoice`, so the volume entity is experimental. Its effect on the login beep and on other
+charger sounds has not been verified.
 
 ## Limitations
 

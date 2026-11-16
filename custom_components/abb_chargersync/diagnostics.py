@@ -29,6 +29,19 @@ async def async_get_config_entry_diagnostics(hass, entry):
                     }
                     for name, failure in s.get("settings_failures", {}).items()
                 },
+                "connection": {
+                    key: value
+                    for key, value in s.get("connection", {}).items()
+                    if key
+                    in {
+                        "connected",
+                        "connects",
+                        "consecutive_failures",
+                        "last_disconnect",
+                        "connection_age",
+                        "reconnect_in",
+                    }
+                },
                 "state_fields": sorted(s.get("state", {})),
                 "resource_names": sorted(s.get("resources", {})),
                 "unsupported": sorted(coordinator.controllers[i].unsupported),
