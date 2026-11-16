@@ -40,8 +40,17 @@ async def async_get_config_entry_diagnostics(hass, entry):
                         "last_disconnect",
                         "connection_age",
                         "reconnect_in",
+                        "session_takeovers",
                     }
                 },
+                "rfid_card_count": (
+                    len(s["resources"]["rfid-cards"])
+                    if isinstance(s.get("resources", {}).get("rfid-cards"), list)
+                    else None
+                ),
+                "firmware_notice": bool(s.get("resources", {}).get("notice")),
+                "outlet": s["device"].get("outlet"),
+                "product_type": s["device"].get("productType"),
                 "state_fields": sorted(s.get("state", {})),
                 "resource_names": sorted(s.get("resources", {})),
                 "unsupported": sorted(coordinator.controllers[i].unsupported),

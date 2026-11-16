@@ -189,3 +189,24 @@ def test_volume_parsing_and_body():
     with pytest.raises(DeviceRejectedError) as err:
         check_reply(Frame(181, 3, b""))
     assert err.value.result_code == 3 and isinstance(err.value, ProtocolError)
+
+
+def test_lifetime_and_meter_parsers():
+    from custom_components.abb_chargersync.protocol import (
+        parse_meter_status,
+        parse_solar_totals,
+        parse_total_energy,
+    )
+
+    assert parse_total_energy(struct.pack("<I", 123456)) == 1234.56
+    # Live vector: 174 reported 4959409 Wh while 184 reported 4959.4 kWh.
+    assert parse_solar_totals(struct.pack("<II", 4959409, 34409)) == (4959.409, 34.409)
+    assert parse_solar_totals(struct.pack("<I", 5000)) == (5.0, None)
+    assert parse_meter_status(b"\1" + struct.pack("<I", 7)) == {
+        "meter_status": 1,
+        "modbus_status": 7,
+    }
+    assert parse_meter_status(b"\0") == {"meter_status": 0}
+    for parser in (parse_total_energy, parse_solar_totals, parse_meter_status):
+        with pytest.raises(ProtocolError):
+            parser(b"")

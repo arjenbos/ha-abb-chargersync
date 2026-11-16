@@ -5,6 +5,7 @@ import functools
 import json
 from unittest.mock import AsyncMock, Mock
 
+import aiohttp
 import pytest
 from aiohttp import web
 
@@ -281,3 +282,54 @@ def test_long_lived_connection_resets_backoff(monkeypatch):
     now[0] += websocket.STABLE_CONNECTION
     remote._note_lost("connection_closed")
     assert remote.failures == 1 and remote.connection_stats()["reconnect_in"] == 0
+
+
+async def test_session_takeover_defers_reclaiming(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(websocket.time, "monotonic", lambda: now[0])
+    client = Mock(remote_session_changes=0)
+    client.remote_credentials = AsyncMock(return_value=("authen", "session"))
+    client.session.ws_connect = AsyncMock(side_effect=aiohttp.ClientError)
+    remote = RemoteCharger(client, "TEST")
+    # First connect records the session generation (the socket open then fails).
+    with pytest.raises(ChargerSyncError):
+        await remote.command(181)
+    remote._retry_at = 0
+    client.remote_session_changes = 1
+    with pytest.raises(ReconnectPostponedError):
+        await remote.command(181)
+    assert client.session.ws_connect.await_count == 1
+    stats = remote.connection_stats()
+    assert stats["session_takeovers"] == 1 and stats["reconnect_in"] == websocket.TAKEOVER_BACKOFF
+    assert remote.last_disconnect == "session_taken_over"
+    # The same generation after the wait reconnects; another takeover doubles the wait.
+    now[0] += websocket.TAKEOVER_BACKOFF
+    with pytest.raises(ChargerSyncError, match="outcome may be unknown"):
+        await remote.command(181)
+    assert client.session.ws_connect.await_count == 2
+    remote._retry_at = 0
+    client.remote_session_changes = 2
+    with pytest.raises(ReconnectPostponedError):
+        await remote.command(181)
+    assert remote.connection_stats()["reconnect_in"] == 2 * websocket.TAKEOVER_BACKOFF
+    # A user action reclaims immediately.
+    remote.allow_reconnect()
+    with pytest.raises(ChargerSyncError, match="outcome may be unknown"):
+        await remote.command(181)
+    assert client.session.ws_connect.await_count == 3
+
+
+async def test_profile_session_change_is_counted_without_exposing_it():
+    from custom_components.abb_chargersync.api import ChargerSyncClient
+
+    client = ChargerSyncClient(Mock(), {"access_token": "a", "expires_at": 1e12})
+    client.user = AsyncMock(return_value={"id": 1, "authen": "e", "sessionId": "one"})
+    await client.remote_credentials()
+    client.invalidate_remote_credentials()
+    await client.remote_credentials()
+    assert client.remote_session_changes == 0
+    client.user.return_value = {"id": 1, "authen": "e", "sessionId": "two"}
+    client.invalidate_remote_credentials()
+    await client.remote_credentials()
+    assert client.remote_session_changes == 1
+    assert "two" not in repr(vars(client).get("_identity_digest"))

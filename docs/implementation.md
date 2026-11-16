@@ -47,9 +47,24 @@ therefore keeps the connection open:
 - After one immediate retry, which the app also performs, reconnects back off from 30 seconds
   to 10 minutes. A connection that lasted 5 minutes resets the backoff. User actions bypass it.
 - The REST `online` flag only prevents opening a new connection; it does not close a live one.
+- One remote session per account: when another client signs in, the cloud resets this
+  connection with TCP close code 1006. A login with the cached `sessionId` then returns
+  `login` code 1 until the profile is read again. The profile's `sessionId` has then changed. The
+  integration counts that change by digest only and waits 10 minutes before reclaiming, doubling
+  up to 60 minutes. A Docker test on November 16, 2026 reproduced the cycle against a production
+  install on the same account: connections lasted 0–70 seconds.
 
 The **Remote logins** sensor and diagnostics report the connect count, open state, last
 disconnect reason, connection age and reconnect delay, without identifiers or payloads.
+
+## Additional app and SDK reads
+
+- **Lifetime energy:** `READ_TOTAL_CHARGE_CMD` (184) has no request body. `QueryChargeQuantityResponse` reads a little-endian uint32 and divides it by 100 to give kWh. Command 174 (`QUERY_ACCUMULATED_CHARGING_POWER_WITH_SOLAR_ENERGY_INFO`) takes one request byte and returns unscaled total and solar totals. The integration sends the same port byte as the verified solar status read. On November 16, 2026, a live read returned 4959409 from command 174 while command 184 reported 4959.4 kWh, so 174 is in Wh. The integration uses 184 for lifetime energy and 174's second field for lifetime solar energy. The app calls neither command.
+- **Grid meter status:** `QUERY_METER_CONNECT_STATUS` (229) has no request body. It returns a status byte and a little-endian uint32 master/Modbus status. The app does not call it or define meanings for these values.
+- **Cable release:** the app's stuck-cable screen sends the same commands as the lock entity, `FORCE_UNLOCK` (209) and `FORCE_LOCK` (231). `ChargerCapabilitiesUtils` limits release to socket outlets on FX devices or firmware 1.6.8 or later. Locking also needs firmware 1.8.2 or later and a remote feature flag that cannot be read here. The integration applies these firmware and outlet checks when the cloud reports the fields.
+- **RFID cards:** `GET api/v2/rfid-cards?showHidden=false` lists account cards with `name`, `serialNumber`, `deviceId`, and `status`. The integration reads them with the five-minute inventory and never writes them.
+- **Firmware notice:** `GET api/v2/notices?deviceNumber=<number>&type=firmware_upgrade` returns `title` and `content`, as on the app's charging screen.
+- **Device logs:** commands 188/189 remain available through `get_data` (`log_info`, `logs`).
 
 ## Sound volume
 

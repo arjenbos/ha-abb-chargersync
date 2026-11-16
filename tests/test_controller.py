@@ -169,3 +169,30 @@ async def test_settings_read_volume_from_system_information():
     remote.query_configuration.side_effect = UnsupportedError
     result = await ChargerController(remote).settings()
     assert result == {"volume": 60}
+
+
+async def test_settings_read_lifetime_totals_and_meter():
+    import struct
+
+    replies = {
+        184: struct.pack("<I", 250000),
+        174: struct.pack("<II", 2500000, 400000),
+        229: b"\1" + struct.pack("<I", 0),
+    }
+
+    async def command(cmd, body=b""):
+        if cmd in replies:
+            return replies[cmd]
+        raise UnsupportedError
+
+    remote = AsyncMock()
+    remote.command.side_effect = command
+    remote.query_configuration.side_effect = UnsupportedError
+    result = await ChargerController(remote).settings()
+    assert result == {
+        "lifetime_energy": 2500.0,
+        "lifetime_solar_energy": 400.0,
+        "meter_status": 1,
+        "modbus_status": 0,
+    }
+    assert call(174, b"\0") in remote.command.await_args_list

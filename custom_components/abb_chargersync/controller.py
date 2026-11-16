@@ -12,8 +12,11 @@ from .protocol import (
     ProtocolError,
     encode_limits,
     parse_limits,
+    parse_meter_status,
     parse_solar_status,
+    parse_solar_totals,
     parse_status,
+    parse_total_energy,
     parse_volume,
     volume_body,
 )
@@ -55,6 +58,9 @@ class ChargerController:
             ("eco_threshold", 38),
             ("cable", 3),
             ("volume", None),
+            ("total_energy", None),
+            ("solar_totals", None),
+            ("meter", None),
         ):
             data = None
             try:
@@ -62,6 +68,13 @@ class ChargerController:
                     data = await self.optional(key, lambda: self.remote.command(221))
                 elif key == "volume":
                     data = await self.optional(key, lambda: self.remote.command(177))
+                elif key == "total_energy":
+                    data = await self.optional(key, lambda: self.remote.command(184))
+                elif key == "solar_totals":
+                    # Same port byte as the verified solar status read (175).
+                    data = await self.optional(key, lambda: self.remote.command(174, b"\0"))
+                elif key == "meter":
+                    data = await self.optional(key, lambda: self.remote.command(229))
                 elif kind is None:
                     data = await self.optional(key, lambda: self.remote.command(224))
                 else:
@@ -119,6 +132,14 @@ class ChargerController:
         if key == "volume":
             volume = parse_volume(data)
             return {} if volume is None else {"volume": volume}
+        if key == "total_energy":
+            return {"lifetime_energy": parse_total_energy(data)}
+        if key == "solar_totals":
+            # The 184 total is kept for lifetime energy; 174 adds the solar share.
+            _total, solar = parse_solar_totals(data)
+            return {} if solar is None else {"lifetime_solar_energy": solar}
+        if key == "meter":
+            return parse_meter_status(data)
         return {}
 
     async def simple(self, command: int, body: bytes = b"") -> None:

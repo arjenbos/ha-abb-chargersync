@@ -44,8 +44,23 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
     async def async_close(self) -> None:
         await asyncio.gather(*(c.remote.close() for c in self.controllers.values()))
 
+    async def _optional_account_read(self, name: str, read) -> Any:
+        key = (0, name)
+        if key in self._optional_unsupported:
+            return None
+        try:
+            return await read()
+        except UnsupportedError:
+            self._optional_unsupported.add(key)
+        except AuthenticationError:
+            raise
+        except ChargerSyncError:
+            pass
+        return None
+
     async def _inventory(self) -> None:
         devices = await self.client.devices()
+        cards = await self._optional_account_read("rfid-cards", self.client.rfid_cards)
         inventory = {int(d["id"]): d for d in devices}
         for device_id in set(self.controllers) - inventory.keys():
             await self.controllers.pop(device_id).remote.close()
@@ -74,6 +89,22 @@ class ChargerSyncCoordinator(DataUpdateCoordinator[dict[int, dict[str, Any]]]):
                 except ChargerSyncError:
                     # Do not retain an old resource as though it were freshly fetched.
                     continue
+            if cards is not None:
+                # Cards without a charger reference belong to the account and apply here too.
+                snapshot["resources"]["rfid-cards"] = [
+                    c for c in cards if c.get("deviceId") in (None, device_id)
+                ]
+            if (device_id, "notice") not in self._optional_unsupported:
+                try:
+                    snapshot["resources"]["notice"] = await self.client.firmware_notice(
+                        device["deviceNumber"]
+                    )
+                except UnsupportedError:
+                    self._optional_unsupported.add((device_id, "notice"))
+                except AuthenticationError:
+                    raise
+                except ChargerSyncError:
+                    pass
             fresh[device_id] = snapshot
         self._rest = fresh
         self._rest_updated = time.monotonic()

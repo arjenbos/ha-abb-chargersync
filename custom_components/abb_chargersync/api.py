@@ -1,8 +1,10 @@
-"""Asynchronous cloud client. No Bluetooth or authorization-management endpoints."""
+"""Asynchronous cloud client. No Bluetooth endpoints; RFID cards are only ever read."""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import logging
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -11,6 +13,8 @@ from typing import Any
 import aiohttp
 
 from .const import API_URL, APP_VERSION, CLIENT_ID, CLIENT_SECRET, REQUEST_TIMEOUT
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ChargerSyncError(Exception):
@@ -42,6 +46,8 @@ class ChargerSyncClient:
         self._remote_identity: tuple[str, str] | None = None
         self._identity_access: str | None = None
         self._identity_expires = 0.0
+        self._identity_digest: str | None = None
+        self.remote_session_changes = 0
 
     async def login(self, username: str, password: str) -> None:
         await self._token_request(
@@ -169,6 +175,27 @@ class ChargerSyncClient:
             }
         return await self._request("GET", f"api/v2/devices/{device_id}/{resource}", params=params)
 
+    async def rfid_cards(self) -> list[dict]:
+        """Account RFID cards, as the app's card list reads them; never added or deleted here."""
+        result = await self._request("GET", "api/v2/rfid-cards", params={"showHidden": "false"})
+        if not isinstance(result, list) or any(not isinstance(c, dict) for c in result):
+            raise ChargerSyncError("Invalid RFID card list")
+        return result
+
+    async def firmware_notice(self, device_number: str) -> dict | None:
+        """The firmware-upgrade notice the app shows on its charging screen, if any."""
+        result = await self._request(
+            "GET",
+            "api/v2/notices",
+            params={"deviceNumber": device_number, "type": "firmware_upgrade"},
+        )
+        if not isinstance(result, dict) or not (result.get("title") or result.get("content")):
+            return None
+        return {
+            "title": str(result.get("title") or ""),
+            "content": str(result.get("content") or ""),
+        }
+
     async def currencies(self) -> Any:
         return await self._request("GET", "api/v2/currencies")
 
@@ -236,6 +263,12 @@ class ChargerSyncClient:
                 or not session_id
             ):
                 raise ChargerSyncError("User profile is missing remote session credentials")
+            # Compare digests only: a changed session means another login replaced ours.
+            digest = hashlib.sha256(session_id.encode()).hexdigest()
+            if self._identity_digest is not None and digest != self._identity_digest:
+                self.remote_session_changes += 1
+                _LOGGER.debug("Cloud remote session was replaced by another login")
+            self._identity_digest = digest
             self._remote_identity = (authen, session_id)
             self._identity_access = self.token.get("access_token")
             self._identity_expires = time.monotonic() + 300

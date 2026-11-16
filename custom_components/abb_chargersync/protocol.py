@@ -106,6 +106,36 @@ def parse_volume(body: bytes) -> int | None:
     return volume if volume <= 100 else None
 
 
+def parse_total_energy(body: bytes) -> float:
+    """READ_TOTAL_CHARGE_CMD (184): QueryChargeQuantityResponse, uint32 in 0.01 kWh."""
+    if len(body) < 4:
+        raise ProtocolError("Truncated total energy reply")
+    return int.from_bytes(body[:4], "little") / 100
+
+
+def parse_solar_totals(body: bytes) -> tuple[float, float | None]:
+    """Command 174 (QueryAccumulatedChargingPowerWithSolarEnergyInfoResponse) totals in kWh.
+
+    The SDK leaves both uint32 fields unscaled. A live read on November 16, 2026 returned
+    4959409 while command 184 reported 4959.4 kWh, so the unit is Wh.
+    """
+    if len(body) < 4:
+        raise ProtocolError("Truncated solar energy totals")
+    total = int.from_bytes(body[:4], "little") / 1000
+    solar = int.from_bytes(body[4:8], "little") / 1000 if len(body) >= 8 else None
+    return total, solar
+
+
+def parse_meter_status(body: bytes) -> dict:
+    """QUERY_METER_CONNECT_STATUS (229): meter status byte, then uint32 master/Modbus status."""
+    if not body:
+        raise ProtocolError("Empty meter status reply")
+    result = {"meter_status": body[0]}
+    if len(body) >= 5:
+        result["modbus_status"] = int.from_bytes(body[1:5], "little")
+    return result
+
+
 def volume_body(volume: int) -> bytes:
     """SET_VOICE_CMD (178) body from RequestBodyFactory: volume byte, then constant 1."""
     if not 0 <= volume <= 100:

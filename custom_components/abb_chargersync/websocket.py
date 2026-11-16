@@ -10,6 +10,7 @@ background reader consumes cloud messages between polls, as `WebSocketClientImpl
 from __future__ import annotations
 
 import asyncio
+import logging
 import struct
 import time
 from collections.abc import Callable
@@ -30,11 +31,17 @@ from .protocol import (
     identity_token,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 PING_INTERVAL = 30
 # A connection that lasted this long counts as healthy; its loss restarts the backoff.
 STABLE_CONNECTION = 300
 BACKOFF_BASE = 30
 BACKOFF_MAX = 600
+# Another client (the app, another install) replaced the account's cloud session.
+# Reclaiming at once would log the other client out again, and each login can beep.
+TAKEOVER_BACKOFF = 600
+TAKEOVER_MAX = 3600
 
 
 class RemoteError(ChargerSyncError):
@@ -84,6 +91,8 @@ class RemoteCharger:
         self.last_disconnect: str | None = None
         self._connected_at: float | None = None
         self._retry_at = 0.0
+        self.takeovers = 0
+        self._seen_session_changes: int | None = None
 
     @property
     def connected(self) -> bool:
@@ -103,6 +112,7 @@ class RemoteCharger:
                 else None
             ),
             "reconnect_in": max(0, int(self._retry_at - now)) if not self.connected else 0,
+            "session_takeovers": self.takeovers,
         }
 
     def allow_reconnect(self) -> None:
@@ -115,6 +125,7 @@ class RemoteCharger:
         now = time.monotonic()
         if self._connected_at is not None and now - self._connected_at >= STABLE_CONNECTION:
             self.failures = 0
+            self.takeovers = 0
         self._connected_at = None
         self.failures += 1
         # Like the app, retry once immediately; back off exponentially after that.
@@ -162,6 +173,13 @@ class RemoteCharger:
             while True:
                 message = await ws.receive()
                 if message.type != aiohttp.WSMsgType.TEXT:
+                    _LOGGER.debug(
+                        "WebSocket ended after %ss: type=%s code=%s exception=%s",
+                        self._age(),
+                        message.type.name,
+                        ws.close_code,
+                        type(ws.exception()).__name__ if ws.exception() else None,
+                    )
                     self._fail_waiters(RemoteError("connection_closed", ws.close_code))
                     break
                 try:
@@ -188,9 +206,19 @@ class RemoteCharger:
             self._ready = False
             await ws.close()
 
+    def _age(self) -> int | None:
+        return None if self._connected_at is None else int(time.monotonic() - self._connected_at)
+
     def _dispatch(self, response: dict) -> str | None:
         """Route one envelope; return a reason when the connection must end."""
         method = response.get("method")
+        # Method names and result codes only; never payloads or identifiers.
+        _LOGGER.debug(
+            "WebSocket received method=%s code=%s age=%ss",
+            method,
+            response.get("code"),
+            self._age(),
+        )
         if method == "login":
             if self._login is not None and not self._login.done():
                 self._login.set_result(self._reply_code(response))
@@ -241,6 +269,26 @@ class RemoteCharger:
             pending[2].set_result(reply)
         return None
 
+    def _check_takeover(self) -> None:
+        """Defer reclaiming a session that another login replaced since our last connect."""
+        changes = getattr(self.client, "remote_session_changes", 0)
+        if not isinstance(changes, int):
+            return
+        previous, self._seen_session_changes = self._seen_session_changes, changes
+        if previous is None or changes <= previous:
+            return
+        self.takeovers += 1
+        delay = min(TAKEOVER_BACKOFF * 2 ** (self.takeovers - 1), TAKEOVER_MAX)
+        self._retry_at = time.monotonic() + delay
+        self.last_disconnect = "session_taken_over"
+        self.last_error = {
+            "stage": self.stage,
+            "error": "SessionTakenOver",
+            "reason": "session_taken_over",
+        }
+        _LOGGER.debug("Cloud session taken over by another client; reclaiming in %ss", delay)
+        raise ReconnectPostponedError("Another client is using the cloud session")
+
     async def _connect(self) -> None:
         if self.connected:
             return
@@ -250,6 +298,7 @@ class RemoteCharger:
             raise ReconnectPostponedError("Reconnect postponed after repeated failures")
         self.stage = "remote_credentials"
         authen, session_id = await self.client.remote_credentials()
+        self._check_takeover()
         url = URL(WS_URL).with_query(t=session_id, v=1, e=authen)
         self.stage = "websocket_open"
         self.connects += 1
@@ -277,6 +326,7 @@ class RemoteCharger:
         await self._exchange(176, struct.pack("<IB", int(time.time()), offset + 12))
         self._ready = True
         self._connected_at = time.monotonic()
+        _LOGGER.debug("WebSocket ready (connect #%s)", self.connects)
         self._ping_task = asyncio.create_task(self._ping())
 
     async def _ping(self) -> None:
@@ -285,6 +335,7 @@ class RemoteCharger:
                 await asyncio.sleep(PING_INTERVAL)
                 if self._ws and not self._ws.closed:
                     await self._ws.send_json({"method": "ping"})
+                    _LOGGER.debug("WebSocket ping sent age=%ss", self._age())
         except aiohttp.ClientError, ConnectionError, RuntimeError:
             if self._ws:
                 await self._ws.close()
@@ -293,6 +344,7 @@ class RemoteCharger:
         assert self._ws is not None
         future: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
         self._pending = (command, subtype, future)
+        _LOGGER.debug("WebSocket send command=%s subtype=%s age=%ss", command, subtype, self._age())
         try:
             await self._ws.send_json(
                 {
