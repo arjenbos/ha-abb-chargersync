@@ -14,7 +14,7 @@ data:
 response_variable: charging_history
 ```
 
-`resource` accepts `sessions`, `trends`, `schedules`, `price`, `auto_export`, `firmware`, `currencies`, `load_limits`, `solar_offsets`, `log_info`, and `logs`. The integration never uses the ambiguous active-session POST as a read operation.
+`resource` accepts `sessions`, `trends`, `schedules`, `price`, `auto_export`, `firmware`, `currencies`, `load_limits`, `solar_offsets`, `log_info`, `logs`, `rfid_cards`, and `firmware_notice`. `rfid_cards` returns each card's `id`, `name`, `status`, and `deviceId`, without serial numbers. `firmware_notice` returns the notice's `title` and `content`, or `null`. The integration never uses the ambiguous active-session POST as a read operation.
 
 History and trends support `start_time`, `end_time`, `card_number`, and `company_only`. Sessions use zero-based `page` and `limit`. Missing session date bounds default to the last 365 days through the current time, using `yyyy-MM-dd HH:mm:ss`, as used by the official app dashboard; supply both bounds to query older history. The management card displays this range and checks its order before sending a request. A failed request hides page totals rather than displaying zero energy. Trends optionally accept `trend_type`, as defined by the server protocol. The session date range was verified through live Home Assistant service calls: empty bounds returned HTTP 400, while explicit bounds and the integration defaults returned history successfully. Trend types still follow the server protocol. Logs use `log_from` as the starting serial number, with at most 50 records per request. Log records contain a timestamp, type, code, and detail code; the SDK's Chinese descriptions have not been copied.
 

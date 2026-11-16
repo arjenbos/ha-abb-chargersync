@@ -7,7 +7,7 @@
 
 Custom cloud integration for chargers used with the official ABB ChargerSync app. Based on static analysis of ChargerSync 3.5.0.
 
-**Version 0.2.2 — experimental.** Automated tests cover Home Assistant and a local server emulator. Live testing has now confirmed REST access, remote login, charging-status reads, and several settings on one charger running firmware 1.8.37. Charging commands, other hardware, and concurrent use with the official app still require validation.
+**Version 1.0.0.** Automated tests cover Home Assistant and a local server emulator. Live testing has now confirmed REST access, remote login, charging-status reads, and several settings on one charger running firmware 1.8.37. Charging commands, other hardware, and concurrent use with the official app still require validation.
 
 English is the primary language for code and documentation. Integration translations live in `custom_components/abb_chargersync/translations/`, including Dutch in `nl.json`.
 
@@ -32,17 +32,33 @@ Available per charger, depending on its responses and supported capabilities:
 
 | Platform | Functions |
 |---|---|
-| Sensor | Charging status, session energy, duration, L1/L2/L3 current and voltage, solar energy and share, solar current per phase, maximum current, fault code, installed firmware, and available firmware |
+| Sensor | Charging status, session energy, duration, L1/L2/L3 current and voltage, solar energy and share, solar current per phase, maximum current, fault code, lifetime energy and lifetime solar energy, installed firmware, available firmware, firmware notice, RFID cards (read-only), grid meter status, and remote logins (diagnostic) |
 | Binary sensor | Cloud status, remote connection, charging, and fault |
 | Button | Start charging, stop charging, and skip the random charging delay |
-| Number | Charging current limit and Eco mix minimum current, in whole amperes |
+| Number | Charging current limit and Eco mix minimum current, in whole amperes; charger sound volume (0–100, experimental) |
 | Select | Default and active-session charging modes: `max_speed`, `eco_mix`, `solar` |
 | Switch | Free charging without authorization, start/stop charging with session feedback, enable solar charging control, and ignore the Eco mix start/stop threshold |
-| Lock | Lock and unlock the physical charging cable |
+| Lock | Lock and release the physical charging cable, gated like the app's stuck-cable screen |
 
 The Eco mix minimum current is configurable only when Eco mix is the default mode. Additional thresholds and waiting times are available through actions.
 
 Apparent power is calculated as the sum of U×I and reported in **VA**. It is not measured active power in W. Session readings omitted by the charger outside an active session are not replaced with invented zeros; the corresponding sensors become unavailable. Session sensors are not lifetime energy meters.
+
+**Remote logins** counts cloud WebSocket logins since Home Assistant started. Each login repeats the charger's identity handshake, which can make the charger beep. The integration keeps one connection open per charger, so the count should only rise after Home Assistant restarts, reloads, or a lost connection. Its attributes show whether the connection is open, the last disconnect reason, any reconnect delay, and session takeovers.
+
+The cloud allows one remote session per account. When the official app or another Home Assistant install signs in with the same account, it replaces this integration's session. The integration then waits 10 minutes before reclaiming it, doubling the wait up to 60 minutes if takeovers repeat. Two installs that keep reclaiming the session would otherwise log each other out continuously, and each login can make the charger beep. Use one install per account, or a separate account for testing. Actions you start yourself reconnect immediately.
+
+**Volume** appears when the charger reports a volume in its system information. It uses the SDK's volume command, which the official app does not expose. Whether it affects the login beep, and which other sounds it changes, has not been verified on hardware.
+
+**Lifetime energy** is the charger's own delivered-energy total (SDK command 184, in 0.01 kWh). It survives Home Assistant downtime, so it is the preferred Energy-dashboard meter when the charger reports it. **Lifetime solar energy** comes from command 174, in Wh. A live read confirmed that unit: command 174's total of 4959409 Wh matched command 184's 4959.4 kWh. The official app displays neither value.
+
+**RFID cards** counts the cards the cloud lists for this charger or for the account and shows only their names. Serial numbers authorize charging and are never exposed in entities, diagnostics, or actions. Cards cannot be added or deleted.
+
+**Grid meter status** shows the raw meter and Modbus connection codes from the charger (SDK command 229). The app does not interpret these codes, so the integration shows them unchanged.
+
+**Firmware notice** shows the firmware-upgrade notice that the cloud supplies to the app's charging screen.
+
+The cable lock follows the app's rules: releasing requires a socket outlet and firmware 1.6.8 or later (or an FX device), and locking requires firmware 1.8.2 or later. Chargers with a tethered cable have no lock entity.
 
 The available-firmware sensor shows a version only when the server offers exactly one distinct version. Firmware installation is excluded because the official app requires Bluetooth for it.
 
@@ -201,6 +217,21 @@ Tests use synthetic data and a local cloud emulator, without real account creden
 ## Branding
 
 The original ChargerSync logo and app icon are extracted from the supplied Android package and bundled with the integration. Light and dark logo variants are included. See [asset provenance](docs/branding.md).
+
+## Changes in 1.0.0
+
+- Kept the charger's cloud connection open instead of logging in again. Each login can make the charger beep.
+  - A rotated OAuth access token no longer forces a new WebSocket login. The WebSocket uses the profile session, not the OAuth token.
+  - A command the charger or cloud rejects with a complete reply no longer closes the connection. Only timeouts, transport errors, and corrupt streams do.
+  - A background reader processes cloud messages between polls, as the official app does. Lost connections and device-disconnect notices are detected immediately, and WebSocket pings are answered promptly.
+  - A stale REST offline flag no longer closes a live connection.
+- Added a longer backoff when another client takes over the account's cloud session. The previous behaviour of reclaiming the session at once made two clients log each other out.
+- Added reconnect backoff. After one immediate retry, reconnects wait 30 seconds, doubling up to 10 minutes. A connection that lasted 5 minutes resets the backoff. Actions you start yourself always reconnect immediately.
+- Added the **Remote logins** diagnostic sensor and connection details in diagnostics.
+- Added an experimental **Volume** number entity, using the SDK's system-information read (command 177) and volume command (178).
+- Added **Lifetime energy**, **Lifetime solar energy**, **Grid meter status**, read-only **RFID cards**, and **Firmware notice** sensors.
+- Added `rfid_cards` and `firmware_notice` resources to the `get_data` action.
+- Applied the app's cable capability rules to the lock entity.
 
 ## Changes in 0.2.2
 

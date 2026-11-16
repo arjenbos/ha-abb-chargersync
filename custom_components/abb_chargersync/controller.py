@@ -8,7 +8,18 @@ from collections.abc import Awaitable, Callable
 
 from .api import AuthenticationError, ChargerSyncError, UnsupportedError
 from .const import MODES
-from .protocol import ProtocolError, encode_limits, parse_limits, parse_solar_status, parse_status
+from .protocol import (
+    ProtocolError,
+    encode_limits,
+    parse_limits,
+    parse_meter_status,
+    parse_solar_status,
+    parse_solar_totals,
+    parse_status,
+    parse_total_energy,
+    parse_volume,
+    volume_body,
+)
 from .websocket import RemoteCharger
 
 
@@ -46,11 +57,24 @@ class ChargerController:
             ("default_mode", 10),
             ("eco_threshold", 38),
             ("cable", 3),
+            ("volume", None),
+            ("total_energy", None),
+            ("solar_totals", None),
+            ("meter", None),
         ):
             data = None
             try:
                 if key == "free_charging":
                     data = await self.optional(key, lambda: self.remote.command(221))
+                elif key == "volume":
+                    data = await self.optional(key, lambda: self.remote.command(177))
+                elif key == "total_energy":
+                    data = await self.optional(key, lambda: self.remote.command(184))
+                elif key == "solar_totals":
+                    # Same port byte as the verified solar status read (175).
+                    data = await self.optional(key, lambda: self.remote.command(174, b"\0"))
+                elif key == "meter":
+                    data = await self.optional(key, lambda: self.remote.command(229))
                 elif kind is None:
                     data = await self.optional(key, lambda: self.remote.command(224))
                 else:
@@ -105,11 +129,22 @@ class ChargerController:
             return {"ignore_eco_threshold": bool(data[0])}
         if key == "cable" and len(data) == 1 and data[0] in (1, 2):
             return {"cable_locked": data[0] == 1}
+        if key == "volume":
+            volume = parse_volume(data)
+            return {} if volume is None else {"volume": volume}
+        if key == "total_energy":
+            return {"lifetime_energy": parse_total_energy(data)}
+        if key == "solar_totals":
+            # The 184 total is kept for lifetime energy; 174 adds the solar share.
+            _total, solar = parse_solar_totals(data)
+            return {} if solar is None else {"lifetime_solar_energy": solar}
+        if key == "meter":
+            return parse_meter_status(data)
         return {}
 
     async def simple(self, command: int, body: bytes = b"") -> None:
         result = await self.remote.command(command, body)
-        if command in (180, 192, 209, 231, 164) and (not result or result[0]):
+        if command in (180, 192, 209, 231, 164, 178) and (not result or result[0]):
             raise ProtocolError("Device action rejected")
         if command == 182 and len(result) < 4:
             raise ProtocolError("Truncated stop acknowledgement")
@@ -123,6 +158,11 @@ class ChargerController:
             if not 6 <= current <= parsed["maximum_current"]:
                 raise ProtocolError("Current outside device limits")
             await self.simple(192, bytes((power[0], current)))
+
+    async def set_volume(self, volume: int) -> None:
+        """SET_VOICE_CMD; the official app never sends it, so treat it as experimental."""
+        async with self._write_lock:
+            await self.simple(178, volume_body(volume))
 
     async def set_free_charging(self, enabled: bool) -> None:
         """Change only the authorization bit, matching the official app's read-modify-write."""

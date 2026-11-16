@@ -94,6 +94,8 @@ SCHEMAS = {
                     "load_limits",
                     "log_info",
                     "logs",
+                    "rfid_cards",
+                    "firmware_notice",
                     "solar_offsets",
                     "diagnostics",
                 ]
@@ -199,6 +201,15 @@ async def execute(c, charger_id: int, service: str, data: dict):
             )
         elif resource == "currencies":
             result = await client.currencies()
+        elif resource == "rfid_cards":
+            # Read-only. Card serial numbers authorize charging, so they are not returned.
+            result = [
+                {k: card.get(k) for k in ("id", "name", "status", "deviceId")}
+                for card in await client.rfid_cards()
+                if card.get("deviceId") in (None, charger_id)
+            ]
+        elif resource == "firmware_notice":
+            result = await client.firmware_notice(c.data[charger_id]["device"]["deviceNumber"])
         elif resource == "load_limits":
             result = parse_limits(await c.controllers[charger_id].remote.command(164, b"\x02"))
         elif resource in ("log_info", "logs"):

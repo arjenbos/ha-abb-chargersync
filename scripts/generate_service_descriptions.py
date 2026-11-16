@@ -48,6 +48,8 @@ fields = {
                 "load_limits",
                 "log_info",
                 "logs",
+                "rfid_cards",
+                "firmware_notice",
                 "solar_offsets",
                 "diagnostics",
             ]

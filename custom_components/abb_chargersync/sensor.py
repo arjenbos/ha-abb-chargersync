@@ -52,6 +52,18 @@ SENSORS = {
         SensorStateClass.MEASUREMENT,
     ),
     "fault_code": ("Fault code", None, None, None),
+    "lifetime_energy": (
+        "Lifetime energy",
+        UnitOfEnergy.KILO_WATT_HOUR,
+        SensorDeviceClass.ENERGY,
+        SensorStateClass.TOTAL_INCREASING,
+    ),
+    "lifetime_solar_energy": (
+        "Lifetime solar energy",
+        UnitOfEnergy.KILO_WATT_HOUR,
+        SensorDeviceClass.ENERGY,
+        SensorStateClass.TOTAL_INCREASING,
+    ),
     "maximum_current": (
         "Maximum current",
         UnitOfElectricCurrent.AMPERE,
@@ -90,6 +102,16 @@ async def async_setup_entry(hass, entry, async_add_entities):
             if key == "status" or key in snapshot.get("state", {}):
                 yield ChargerSyncSensor(c, i, key)
         yield FirmwareSensor(c, i, "firmware", "Firmware", remote=False)
+        yield RemoteLoginSensor(c, i, "remote_logins", "Remote logins", remote=False)
+        if "meter_status" in snapshot.get("state", {}):
+            yield MeterStatusSensor(
+                c, i, "meter_status", "Grid meter status", required="meter_status"
+            )
+        resources = snapshot.get("resources", {})
+        if "rfid-cards" in resources:
+            yield RfidCardsSensor(c, i, "rfid_cards", "RFID cards", remote=False)
+        if "notice" in resources:
+            yield FirmwareNoticeSensor(c, i, "firmware_notice", "Firmware notice", remote=False)
         if "latest-upgrade-packages" in snapshot.get("resources", {}):
             yield FirmwareAvailableSensor(
                 c, i, "available_firmware", "Available firmware", remote=False
@@ -173,6 +195,95 @@ class ChargingEnergySensor(ChargerSyncEntity, RestoreSensor):
         return EnergyStoredData(
             self.native_value, self.native_unit_of_measurement, self.counter.as_dict()
         )
+
+
+class MeterStatusSensor(ChargerSyncEntity, SensorEntity):
+    """Raw QUERY_METER_CONNECT_STATUS codes; the app assigns them no meaning."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:meter-electric"
+
+    @property
+    def native_value(self):
+        return self.state_data.get("meter_status")
+
+    @property
+    def extra_state_attributes(self):
+        return {"modbus_status": self.state_data.get("modbus_status")}
+
+
+class RfidCardsSensor(ChargerSyncEntity, SensorEntity):
+    """Read-only card count. Card serial numbers are credentials and never exposed here."""
+
+    _attr_icon = "mdi:card-account-details"
+
+    @property
+    def cards(self) -> list:
+        cards = self.snapshot.get("resources", {}).get("rfid-cards")
+        return cards if isinstance(cards, list) else []
+
+    @property
+    def available(self):
+        return super().available and "rfid-cards" in self.snapshot.get("resources", {})
+
+    @property
+    def native_value(self):
+        return len(self.cards)
+
+    @property
+    def extra_state_attributes(self):
+        return {"names": [str(c.get("name") or "") for c in self.cards]}
+
+
+class FirmwareNoticeSensor(ChargerSyncEntity, SensorEntity):
+    """The cloud's firmware-upgrade notice, as shown on the app's charging screen."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:information-outline"
+
+    @property
+    def notice(self) -> dict:
+        notice = self.snapshot.get("resources", {}).get("notice")
+        return notice if isinstance(notice, dict) else {}
+
+    @property
+    def native_value(self):
+        return self.notice.get("title", "")[:255] or None
+
+    @property
+    def extra_state_attributes(self):
+        return {"content": self.notice.get("content")}
+
+
+class RemoteLoginSensor(ChargerSyncEntity, SensorEntity):
+    """Cloud logins since Home Assistant started; each one can make the charger beep."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:login"
+
+    @property
+    def available(self):
+        return super().available and "connection" in self.snapshot
+
+    @property
+    def native_value(self):
+        return self.snapshot.get("connection", {}).get("connects")
+
+    @property
+    def extra_state_attributes(self):
+        stats = self.snapshot.get("connection", {})
+        return {
+            key: stats.get(key)
+            for key in (
+                "connected",
+                "consecutive_failures",
+                "last_disconnect",
+                "connection_age",
+                "reconnect_in",
+                "session_takeovers",
+            )
+        }
 
 
 class FirmwareSensor(ChargerSyncEntity, SensorEntity):

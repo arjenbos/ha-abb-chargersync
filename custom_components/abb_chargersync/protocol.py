@@ -20,6 +20,14 @@ class ProtocolError(ChargerSyncError):
     """Malformed, rejected or incomplete device response."""
 
 
+class DeviceRejectedError(ProtocolError):
+    """A complete, well-formed reply carried a non-zero device result code."""
+
+    def __init__(self, result_code: int) -> None:
+        super().__init__(f"Device rejected command ({result_code})")
+        self.result_code = result_code
+
+
 class ConfigurationUnavailableError(ChargerSyncError):
     """A configuration read was rejected for now, not proof of missing capability."""
 
@@ -81,8 +89,58 @@ def check_reply(frame: Frame) -> bytes:
     if frame.code in (20, 21):
         raise UnsupportedError("Device does not support command")
     if frame.code:
-        raise ProtocolError(f"Device rejected command ({frame.code})")
+        raise DeviceRejectedError(frame.code)
     return frame.body
+
+
+# READ_SYS_INFO_CMD (177) reply: QuerySysInfoResponse reads the volume ("voice") from
+# body byte 61, after the device number, plug type, versions, model and charge mode.
+SYS_INFO_VOLUME_OFFSET = 61
+
+
+def parse_volume(body: bytes) -> int | None:
+    """Return the 0..100 volume from a system-information reply, if the charger reports it."""
+    if len(body) <= SYS_INFO_VOLUME_OFFSET:
+        return None
+    volume = body[SYS_INFO_VOLUME_OFFSET]
+    return volume if volume <= 100 else None
+
+
+def parse_total_energy(body: bytes) -> float:
+    """READ_TOTAL_CHARGE_CMD (184): QueryChargeQuantityResponse, uint32 in 0.01 kWh."""
+    if len(body) < 4:
+        raise ProtocolError("Truncated total energy reply")
+    return int.from_bytes(body[:4], "little") / 100
+
+
+def parse_solar_totals(body: bytes) -> tuple[float, float | None]:
+    """Command 174 (QueryAccumulatedChargingPowerWithSolarEnergyInfoResponse) totals in kWh.
+
+    The SDK leaves both uint32 fields unscaled. A live read on November 16, 2026 returned
+    4959409 while command 184 reported 4959.4 kWh, so the unit is Wh.
+    """
+    if len(body) < 4:
+        raise ProtocolError("Truncated solar energy totals")
+    total = int.from_bytes(body[:4], "little") / 1000
+    solar = int.from_bytes(body[4:8], "little") / 1000 if len(body) >= 8 else None
+    return total, solar
+
+
+def parse_meter_status(body: bytes) -> dict:
+    """QUERY_METER_CONNECT_STATUS (229): meter status byte, then uint32 master/Modbus status."""
+    if not body:
+        raise ProtocolError("Empty meter status reply")
+    result = {"meter_status": body[0]}
+    if len(body) >= 5:
+        result["modbus_status"] = int.from_bytes(body[1:5], "little")
+    return result
+
+
+def volume_body(volume: int) -> bytes:
+    """SET_VOICE_CMD (178) body from RequestBodyFactory: volume byte, then constant 1."""
+    if not 0 <= volume <= 100:
+        raise ValueError("Volume outside 0..100")
+    return bytes((volume, 1))
 
 
 def identity_body(device_number: str, user_id: int = 0) -> bytes:
